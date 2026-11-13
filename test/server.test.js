@@ -804,7 +804,7 @@ test("chrome declares the Lavish design-system tokens", async () => {
   assert.match(css, /--ease:cubic-bezier\(.2,.6,.2,1\)/);
   assert.match(css, /--dur-slow:320ms/);
   assert.match(css, /--bar-h:56px/);
-  assert.match(css, /--panel-w:360px/);
+  assert.match(css, /--panel-w:440px/);
 });
 
 test("artifact SDK uses design-token aliases for annotation highlight and shadow UI", () => {
