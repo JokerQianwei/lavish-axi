@@ -2056,6 +2056,8 @@ export function shouldRestartServer(currentVersion, healthBody, forceRestart = f
 // A running server newer than this CLI is adopted, never replaced: two installed versions on one
 // machine would otherwise restart each other's server in turn. Numeric, so 0.1.9 is older than
 // 0.1.10. A version that does not parse falls back to "different means replace".
+// fork 版本号带后缀（如 0.1.96-jq.1）：按数字主版本比较新旧；主版本相同而字符串不同
+// （0.1.96 与 0.1.96-jq.1）仍按「不同就替换」，保证装上 fork 后旧的同号上游 server 被换掉。
 function isServerOlderThanCli(currentVersion, runningVersion) {
   if (runningVersion === currentVersion) return false;
   const current = parseReleaseVersion(currentVersion);
@@ -2064,11 +2066,12 @@ function isServerOlderThanCli(currentVersion, runningVersion) {
   for (let index = 0; index < 3; index += 1) {
     if (running[index] !== current[index]) return running[index] < current[index];
   }
-  return false;
+  return true;
 }
 
+// 只取 x.y.z 数字主版本，允许 `-` 后的预发布/fork 后缀；`v` 前缀等其他形式不解析。
 function parseReleaseVersion(version) {
-  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(String(version));
+  const match = /^(\d+)\.(\d+)\.(\d+)(?:-[0-9A-Za-z.-]+)?$/.exec(String(version));
   return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : null;
 }
 
