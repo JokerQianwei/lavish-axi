@@ -119,6 +119,7 @@ const panelHead = /** @type {HTMLDivElement} */ (document.getElementById("panelH
 const panelSummary = /** @type {HTMLSpanElement} */ (document.getElementById("panelSummary"));
 const panelToggle = /** @type {HTMLButtonElement} */ (document.getElementById("panelToggle"));
 const panelScrim = /** @type {HTMLDivElement} */ (document.getElementById("panelScrim"));
+const panelResizer = /** @type {HTMLDivElement} */ (document.getElementById("panelResizer"));
 const sidebarToggle = /** @type {HTMLButtonElement} */ (document.getElementById("sidebarToggle"));
 const sidebarToggleCount = /** @type {HTMLSpanElement} */ (document.getElementById("sidebarToggleCount"));
 const sendButton = /** @type {HTMLButtonElement} */ (document.getElementById("send"));
@@ -1287,12 +1288,197 @@ function scrollPanelToBottom() {
   panelScroll.scrollTop = panelScroll.scrollHeight;
 }
 
+// ---- Layout lock ----
+// chrome.css picks the phone layout by viewport width alone. A phone that reports a desktop-width
+// viewport - "Desktop site" / "Request Desktop Website", or an in-app browser that defaults to it -
+// got the side-by-side desktop layout shrunk onto a phone screen, with a conversation column too
+// small to read. So a touch phone gets the phone layout whatever width it reports, a link can ask
+// for one with `?layout=phone|desktop|auto`, and the More menu offers a toggle remembered on the
+// device. A forced layout rewrites the width conditions of chrome.css's own media rules, so the
+// stylesheet stays the one source of the layouts' geometry.
+const MOBILE_SHEET_MAX_PX = 860;
+const LAYOUT_STORAGE_KEY = "lavish-axi:layout";
+// A phone's short screen side is at most this many CSS px; tablets start well above it.
+const PHONE_SCREEN_MAX_PX = 600;
+// Below this ratio the browser is already close enough to the device width to need no zoom.
+const LAYOUT_ZOOM_MIN = 1.15;
+const LAYOUT_ZOOM_MAX = 4;
+const layoutToggle = /** @type {HTMLButtonElement | null} */ (document.getElementById("layoutToggle"));
+const layoutToggleText = /** @type {HTMLSpanElement | null} */ (document.getElementById("layoutToggleText"));
+// The link's request wins for this page until the user picks a layout from the menu.
+let layoutOverride = readLayoutQuery();
+let layoutPreference = readLayoutPreference();
+/** @type {{ rule: any, original: string }[] | null} */
+let breakpointRules = null;
+let appliedLayout = "";
+let layoutZoom = 1;
+
+function readLayoutQuery() {
+  try {
+    const value = new URLSearchParams(String(location.search || "")).get("layout");
+    return value === "phone" || value === "desktop" || value === "auto" ? value : "";
+  } catch {
+    return "";
+  }
+}
+
+// Once the reviewer picks from the menu, a reload must not bring the link's layout back over it.
+function dropLayoutQuery() {
+  try {
+    const params = new URLSearchParams(String(location.search || ""));
+    if (!params.has("layout")) return;
+    params.delete("layout");
+    const search = params.toString();
+    window.history.replaceState(
+      window.history.state,
+      "",
+      location.pathname + (search ? "?" + search : "") + location.hash,
+    );
+  } catch {
+    // No history API: the choice still applies to this page.
+  }
+}
+
+function readLayoutPreference() {
+  try {
+    const value = localStorage.getItem(LAYOUT_STORAGE_KEY);
+    return value === "phone" || value === "desktop" ? value : "auto";
+  } catch {
+    return "auto";
+  }
+}
+
+function mediaMatches(query) {
+  return typeof window.matchMedia === "function" && Boolean(window.matchMedia(query)?.matches);
+}
+
+// A touch-first device with a phone-sized screen. `screen` reports the device, not the layout
+// viewport, so this holds when the browser asks for a desktop page.
+function isTouchPhone() {
+  const screenInfo = window.screen;
+  const shortSide = Math.min(Number(screenInfo?.width) || 0, Number(screenInfo?.height) || 0);
+  return shortSide > 0 && shortSide <= PHONE_SCREEN_MAX_PX && mediaMatches("(pointer: coarse)");
+}
+
+function layoutMode() {
+  return layoutOverride || layoutPreference;
+}
+
+// "phone" or "desktop" when the layout is locked, "" when the viewport width decides.
+function resolvedLayout() {
+  const mode = layoutMode();
+  if (mode === "phone" || mode === "desktop") return mode;
+  return isTouchPhone() ? "phone" : "";
+}
+
+function chromeBreakpointRules() {
+  if (breakpointRules) return breakpointRules;
+  const found = [];
+  const visit = (rules) => {
+    for (const rule of Array.from(rules || [])) {
+      const media = /** @type {any} */ (rule).media;
+      if (media && typeof media.mediaText === "string" && /\(max-width:\s*\d+px\)/.test(media.mediaText)) {
+        found.push({ rule, original: media.mediaText });
+      }
+      if (/** @type {any} */ (rule).cssRules) visit(/** @type {any} */ (rule).cssRules);
+    }
+  };
+  for (const sheet of Array.from(document.styleSheets || [])) {
+    if (!/\/chrome\.css(?:[?#]|$)/.test(String(sheet.href || ""))) continue;
+    try {
+      visit(sheet.cssRules);
+    } catch {
+      // An unreadable sheet keeps its own media rules; the lock then only affects the JS layout.
+    }
+  }
+  breakpointRules = found;
+  return found;
+}
+
+// Each `(max-width: Npx)` becomes always-true or never-true for a locked layout. The phone lock keeps
+// the narrower refinements (640px, 320px) honest against the width the page is laid out at.
+function lockedMediaText(original, layout, width) {
+  return original.replace(/\(max-width:\s*(\d+)px\)/g, (_match, px) => {
+    const limit = Number(px);
+    const matches = layout === "phone" && (limit >= MOBILE_SHEET_MAX_PX || width <= limit);
+    return matches ? "(min-width: 0px)" : "(max-width: 0px)";
+  });
+}
+
+// A phone showing a desktop-width viewport scales the whole page down to fit; zoom the chrome back
+// up so the phone layout reads at phone size.
+function phoneLayoutZoom() {
+  const viewportWidth = Number(window.innerWidth) || 0;
+  if (viewportWidth <= MOBILE_SHEET_MAX_PX) return 1;
+  const screenInfo = window.screen;
+  const width = Number(screenInfo?.width) || 0;
+  const height = Number(screenInfo?.height) || 0;
+  // The device's orientation, never the viewport's shape: an on-screen keyboard shortens the
+  // viewport of an upright phone without turning it.
+  const orientation = String(screenInfo?.orientation?.type || "");
+  const landscape = orientation ? orientation.startsWith("landscape") : width > height;
+  const deviceWidth = landscape ? Math.max(width, height) : Math.min(width, height);
+  if (!(deviceWidth > 0)) return 1;
+  const zoom = viewportWidth / deviceWidth;
+  return zoom >= LAYOUT_ZOOM_MIN ? Math.round(Math.min(zoom, LAYOUT_ZOOM_MAX) * 1000) / 1000 : 1;
+}
+
+function applyLayoutLock() {
+  const layout = resolvedLayout();
+  // Only a phone needs the zoom: a desktop that asks for the phone layout lays it out at its own size.
+  const zoom = layout === "phone" && isTouchPhone() ? phoneLayoutZoom() : 1;
+  const root = document.documentElement;
+  const zoomChanged = zoom !== layoutZoom;
+  if (root?.style && zoomChanged) root.style.zoom = zoom === 1 ? "" : String(zoom);
+  layoutZoom = zoom;
+  if (zoomChanged) syncVisualViewport();
+  if (root?.style && typeof root.style.setProperty === "function") {
+    if (zoom === 1) root.style.removeProperty("--layout-vh");
+    else root.style.setProperty("--layout-vh", (Number(window.innerHeight) || 0) / zoom + "px");
+  }
+  const width = (Number(window.innerWidth) || 0) / zoom;
+  for (const { rule, original } of chromeBreakpointRules()) {
+    const next = layout ? lockedMediaText(original, layout, width) : original;
+    if (rule.media.mediaText !== next) rule.media.mediaText = next;
+  }
+  appliedLayout = layout;
+  renderLayoutToggle();
+}
+
+function renderLayoutToggle() {
+  if (!layoutToggleText) return;
+  const mode = layoutMode();
+  if (mode === "phone") layoutToggleText.textContent = "Layout: Phone";
+  else if (mode === "desktop") layoutToggleText.textContent = "Layout: Desktop";
+  else layoutToggleText.textContent = appliedLayout === "phone" ? "Layout: Auto (phone)" : "Layout: Auto";
+}
+
+// Auto, then Phone, then Desktop. The choice is the viewer's, so it is kept per device for every
+// review, like the desktop panel collapse.
+function cycleLayoutPreference() {
+  const order = ["auto", "phone", "desktop"];
+  const next = order[(order.indexOf(layoutMode()) + 1) % order.length];
+  layoutOverride = "";
+  dropLayoutQuery();
+  layoutPreference = next;
+  try {
+    if (next === "auto") localStorage.removeItem(LAYOUT_STORAGE_KEY);
+    else localStorage.setItem(LAYOUT_STORAGE_KEY, next);
+  } catch {
+    // Storage refused: the choice still applies to this page.
+  }
+  applyLayoutLock();
+  onLayoutChange();
+}
+
+applyLayoutLock();
+
 // ---- Phone-width conversation sheet ----
 // Below this width chrome.css turns the conversation panel into a dock the user raises as a
 // bottom sheet over the artifact. This controller owns intent, accessibility state, gestures,
 // visual-viewport measurements, and the dock summary; CSS owns the geometry. The query must match
 // the one chrome.css lays the sheet out under.
-const MOBILE_SHEET_MEDIA = "(max-width: 860px)";
+const MOBILE_SHEET_MEDIA = "(max-width: " + MOBILE_SHEET_MAX_PX + "px)";
 // How far a drag on the dock must travel before it counts as a gesture rather than a tap.
 const SHEET_DRAG_THRESHOLD_PX = 48;
 const sheetStorageKey = "lavish-axi:sheet-open:" + key;
@@ -1316,6 +1502,7 @@ function readSheetOpen() {
 }
 
 function isMobileSheet() {
+  if (appliedLayout) return appliedLayout === "phone";
   return Boolean(sheetMedia && sheetMedia.matches);
 }
 
@@ -1401,11 +1588,12 @@ function syncVisualViewport() {
   const root = document.documentElement;
   if (!root || !root.style || typeof root.style.setProperty !== "function") return;
   const viewport = window.visualViewport;
-  const height = viewport ? viewport.height : window.innerHeight;
-  const top = viewport ? viewport.offsetTop : 0;
+  // The visual viewport is measured outside the layout zoom, and these lengths are used inside it.
+  const height = Math.round(viewport ? viewport.height : window.innerHeight) / layoutZoom;
+  const top = Math.round(Math.max(0, (viewport ? viewport.offsetTop : 0) || 0)) / layoutZoom;
   if (!(height > 0)) return;
-  root.style.setProperty("--vv-height", Math.round(height) + "px");
-  root.style.setProperty("--vv-top", Math.round(Math.max(0, top || 0)) + "px");
+  root.style.setProperty("--vv-height", height + "px");
+  root.style.setProperty("--vv-top", top + "px");
 }
 
 function sheetDragOffset(event) {
@@ -1461,21 +1649,33 @@ panelHead.addEventListener("pointercancel", (event) => {
   clearSheetDrag();
   suppressSheetClick = false;
 });
-if (sheetMedia && typeof sheetMedia.addEventListener === "function") {
-  sheetMedia.addEventListener("change", (event) => {
-    if (!event.matches) {
-      sheetOpen = false;
-      try {
-        sessionStorage.removeItem(sheetStorageKey);
-      } catch {
-        // Storage refusal only prevents persistence; the in-memory state is already reset.
-      }
+// The phone layout was entered or left, by a viewport crossing the breakpoint or by the layout lock.
+function onLayoutChange() {
+  if (!isMobileSheet()) {
+    sheetOpen = false;
+    try {
+      sessionStorage.removeItem(sheetStorageKey);
+    } catch {
+      // Storage refusal only prevents persistence; the in-memory state is already reset.
     }
-    // A reply previewed while one layout hid the conversation is no longer owed once the other
-    // layout shows it.
-    if (!isConversationHidden()) unreadAgentReply = "";
-    applySheetState();
-    applyPanelCollapsed();
+  }
+  // A reply previewed while one layout hid the conversation is no longer owed once the other
+  // layout shows it.
+  if (!isConversationHidden()) unreadAgentReply = "";
+  applySheetState();
+  applyPanelCollapsed();
+}
+
+if (layoutToggle) layoutToggle.onclick = () => cycleLayoutPreference();
+// An orientation change moves a zoomed phone layout to a different device width.
+window.addEventListener("resize", () => {
+  if (appliedLayout) applyLayoutLock();
+});
+
+if (sheetMedia && typeof sheetMedia.addEventListener === "function") {
+  sheetMedia.addEventListener("change", () => {
+    // A locked layout ignores the viewport width.
+    if (!appliedLayout) onLayoutChange();
   });
 }
 if (window.visualViewport && typeof window.visualViewport.addEventListener === "function") {
@@ -1552,6 +1752,127 @@ function renderSidebarToggle() {
 }
 
 sidebarToggle.addEventListener("click", () => setPanelCollapsed(!panelCollapsed));
+
+// ---- Desktop conversation panel resize ----
+// The handle on the panel's artifact-facing edge widens the side column by drag or arrow keys. The
+// default width (`--panel-w` in chrome.css) is also the narrowest, and the artifact always keeps
+// ARTIFACT_MIN_WIDTH_PX. Like the collapse, the width is a per-viewer preference under one
+// localStorage key for every session, absent while the panel is at its default. A stored width the
+// window cannot fit is clamped where it is applied and never rewritten, so it comes back when the
+// window grows. chrome.css reads `--panel-resized-w` only outside the phone breakpoint and hides
+// the handle there, so the stored width never reaches the phone sheet.
+const PANEL_MIN_WIDTH_PX = 440;
+const ARTIFACT_MIN_WIDTH_PX = 320;
+const PANEL_RESIZE_STEP_PX = 16;
+const panelWidthStorageKey = "lavish-axi:panel-width";
+let panelWidth = readPanelWidth();
+/** @type {{ pointerId: any, startX: number, startWidth: number, startStored: number | null } | null} */
+let panelResize = null;
+
+function readPanelWidth() {
+  try {
+    const stored = localStorage.getItem(panelWidthStorageKey);
+    const width = /^\d+$/.test(stored || "") ? Number(stored) : 0;
+    return width > PANEL_MIN_WIDTH_PX ? width : null;
+  } catch {
+    return null;
+  }
+}
+
+function maxPanelWidth() {
+  return Math.max(PANEL_MIN_WIDTH_PX, Math.floor(Number(window.innerWidth) || 0) - ARTIFACT_MIN_WIDTH_PX);
+}
+
+function clampPanelWidth(width) {
+  return Math.min(Math.max(Math.round(width), PANEL_MIN_WIDTH_PX), maxPanelWidth());
+}
+
+function applyPanelWidth() {
+  const width = clampPanelWidth(panelWidth || PANEL_MIN_WIDTH_PX);
+  const root = document.documentElement;
+  if (root && root.style && typeof root.style.setProperty === "function") {
+    if (width > PANEL_MIN_WIDTH_PX) root.style.setProperty("--panel-resized-w", width + "px");
+    else root.style.removeProperty("--panel-resized-w");
+  }
+  panelResizer.setAttribute("aria-valuemin", String(PANEL_MIN_WIDTH_PX));
+  panelResizer.setAttribute("aria-valuemax", String(maxPanelWidth()));
+  panelResizer.setAttribute("aria-valuenow", String(width));
+}
+
+function setPanelWidth(width, { persist = true } = {}) {
+  const clamped = clampPanelWidth(width);
+  panelWidth = clamped > PANEL_MIN_WIDTH_PX ? clamped : null;
+  if (persist) storePanelWidth();
+  applyPanelWidth();
+}
+
+function storePanelWidth() {
+  try {
+    if (panelWidth) localStorage.setItem(panelWidthStorageKey, String(panelWidth));
+    else localStorage.removeItem(panelWidthStorageKey);
+  } catch {
+    // Storage refused only means the width does not survive a reload.
+  }
+}
+
+function finishPanelResize(event) {
+  if (!panelResize || event.pointerId !== panelResize.pointerId) return;
+  const { startWidth, startStored } = panelResize;
+  panelResize = null;
+  document.body.classList.remove("panel-resizing");
+  // Only a real width change is stored. A drag that ends where it started, including one pushed
+  // into the clamp, keeps the width the viewer had, so a clamped stored width still comes back.
+  if (clampPanelWidth(panelWidth || PANEL_MIN_WIDTH_PX) !== startWidth) {
+    storePanelWidth();
+  } else {
+    panelWidth = startStored;
+    applyPanelWidth();
+  }
+}
+
+panelResizer.addEventListener("pointerdown", (event) => {
+  // The press is not default-prevented: that would also suppress the mousedown that focuses the
+  // handle for the arrow keys. chrome.css stops text selection under `panel-resizing` instead.
+  if (isMobileSheet() || event.button) return;
+  panelResize = {
+    pointerId: event.pointerId,
+    startX: Number(event.clientX),
+    startWidth: clampPanelWidth(panelWidth || PANEL_MIN_WIDTH_PX),
+    startStored: panelWidth,
+  };
+  // Capture keeps the moves coming once the pointer is over the artifact; chrome.css also turns
+  // off the iframe's pointer events under `panel-resizing` so it cannot swallow them.
+  if (typeof panelResizer.setPointerCapture === "function") panelResizer.setPointerCapture(event.pointerId);
+  document.body.classList.add("panel-resizing");
+});
+panelResizer.addEventListener("pointermove", (event) => {
+  if (!panelResize || event.pointerId !== panelResize.pointerId) return;
+  // The panel is on the right, so moving the edge left (toward the artifact) widens it.
+  const delta = panelResize.startX - Number(event.clientX);
+  setPanelWidth(panelResize.startWidth + delta, { persist: false });
+});
+panelResizer.addEventListener("pointerup", finishPanelResize);
+panelResizer.addEventListener("pointercancel", finishPanelResize);
+panelResizer.addEventListener("lostpointercapture", finishPanelResize);
+panelResizer.addEventListener("keydown", (event) => {
+  if (isMobileSheet()) return;
+  const width = clampPanelWidth(panelWidth || PANEL_MIN_WIDTH_PX);
+  let target;
+  switch (event.key) {
+    case "ArrowLeft":
+      target = width + PANEL_RESIZE_STEP_PX;
+      break;
+    case "ArrowRight":
+      target = width - PANEL_RESIZE_STEP_PX;
+      break;
+    default:
+      return;
+  }
+  event.preventDefault();
+  // A key that cannot move the edge (already at a limit) must not overwrite a clamped stored width.
+  if (clampPanelWidth(target) !== width) setPanelWidth(target);
+});
+window.addEventListener("resize", applyPanelWidth);
 
 function scrollElementIntoView(el) {
   el.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -4831,6 +5152,7 @@ connectLiveEvents();
 
 applySheetState();
 applyPanelCollapsed();
+applyPanelWidth();
 settleQueuedFromTranscript(initialChat, false);
 render();
 setChromeOutdated(false);

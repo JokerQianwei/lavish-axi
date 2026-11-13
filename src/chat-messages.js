@@ -28,7 +28,16 @@ export function normalizePromptId(value) {
 }
 
 const LIST_ITEM = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
-const BLOCK_START = /^(?:```|~~~|#{1,6}\s|\s*(?:[-*+]|\d+[.)])\s+)/;
+// 引用行与分隔线也会打断段落，和列表、标题、围栏一样。
+const BLOCK_START = /^(?:```|~~~|#{1,6}\s|\s*(?:[-*+]|\d+[.)])\s+| {0,3}>)/;
+// 分隔线：三个及以上同一种 - * _，中间可夹空白。要在列表之前判断，因为 `- - -` 也像列表项。
+const THEMATIC_BREAK = /^ {0,3}([-*_])[ \t]*(?:\1[ \t]*){2,}$/;
+const QUOTE_LINE = /^ {0,3}> ?(.*)$/;
+// 表格分隔行：每格是可带冒号的连字符，至少要有一个 `|`，否则 `---` 会被当成只有一列的表。
+// 只对 trim 过的行匹配，相邻的 `\s*` 之间都隔着必需的 `|` 或 `-`，长空白串不会回溯成平方级。
+const TABLE_DELIMITER = /^\|?\s*:?-+:?(?:\s*\|\s*:?-+:?)*\s*\|?$/;
+// 引用最多嵌套这么多层，更深的 `>` 按原文输出，防止恶意输入把递归压到很深。
+const MAX_QUOTE_DEPTH = 8;
 const FENCE_OPEN = /^(```|~~~)/;
 const HEADING = /^(#{1,6})\s+(.+?)(?:\s+#+)?\s*$/;
 
@@ -43,7 +52,8 @@ function renderEmphasis(text) {
   return text
     .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
     .replace(/(^|[^*\w])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>")
-    .replace(/(^|[^_\w])_([^_\n]+)_(?!\w)/g, "$1<em>$2</em>");
+    .replace(/(^|[^_\w])_([^_\n]+)_(?!\w)/g, "$1<em>$2</em>")
+    .replace(/~~([^~\n]+)~~/g, "<del>$1</del>");
 }
 
 const MAX_INLINE_DESTINATION_LENGTH = 2048;
@@ -316,16 +326,73 @@ function renderListItems(items) {
   return render(root.children);
 }
 
-// A deliberate subset of Markdown: what makes an agent reply scannable in a 360px column, and
-// nothing that needs a type scale or a wide table. Blocks: paragraphs on blank lines with a
-// single newline as a line break (the chat convention - agents write one thought per line),
-// headings of any level as one bold lead line, nested bullet and numbered lists, and fenced code.
-// Inline: bold, italic, code, links. Everything else - including tables, images, quotes, rules,
-// and raw HTML - comes out as the text the agent wrote.
+// 按 GFM 拆表格行：去掉首尾的 `|`，在未转义的 `|` 处分格，`\|` 还原成字面竖线。
+function splitTableRow(line) {
+  let row = line.trim();
+  if (row.startsWith("|")) row = row.slice(1);
+  if (row.endsWith("|") && !row.endsWith("\\|")) row = row.slice(0, -1);
+  return row.split(/(?<!\\)\|/).map((cell) => cell.replace(/\\\|/g, "|").trim());
+}
+
+// 表头行加分隔行才算表格，且两行列数一致（GFM 的规则）；两行都必须含 `|`。
+function isTableStart(lines, i) {
+  const header = lines[i];
+  const delimiter = lines[i + 1];
+  if (delimiter === undefined || !header.includes("|") || !delimiter.includes("|")) return false;
+  if (!TABLE_DELIMITER.test(delimiter.trim())) return false;
+  return splitTableRow(header).length === splitTableRow(delimiter).length;
+}
+
+// 对齐只从分隔行的冒号推出，属性值是固定的三个字面量之一，不拼接输入。
+function tableAlignments(delimiter) {
+  return splitTableRow(delimiter).map((cell) => {
+    const left = cell.startsWith(":");
+    const right = cell.endsWith(":");
+    if (left && right) return ' style="text-align:center"';
+    if (right) return ' style="text-align:right"';
+    if (left) return ' style="text-align:left"';
+    return "";
+  });
+}
+
+// 单元格内容一律走 renderInline（先转义再拼标签）。行的格数按表头补齐或截断，
+// 外面包一层 .chat-table，窄栏里宽表横向滚动而不是撑破气泡。
+function renderTable(header, delimiter, rows) {
+  const align = tableAlignments(delimiter);
+  const width = align.length;
+  const renderRow = (line, tag) => {
+    const cells = splitTableRow(line).slice(0, width);
+    while (cells.length < width) cells.push("");
+    return (
+      "<tr>" +
+      cells.map((cell, index) => "<" + tag + align[index] + ">" + renderInline(cell) + "</" + tag + ">").join("") +
+      "</tr>"
+    );
+  };
+  const body = rows.length ? "<tbody>" + rows.map((row) => renderRow(row, "td")).join("") + "</tbody>" : "";
+  return '<div class="chat-table"><table><thead>' + renderRow(header, "th") + "</thead>" + body + "</table></div>";
+}
+
+// A deliberate subset of Markdown: what makes an agent reply scannable in a narrow column.
+// Blocks: paragraphs on blank lines with a single newline as a line break (the chat convention -
+// agents write one thought per line), headings of any level as one bold lead line, nested bullet
+// and numbered lists, fenced code, GFM tables (wrapped so a wide one scrolls sideways), block
+// quotes (nested up to MAX_QUOTE_DEPTH), and thematic breaks. Inline: bold, italic,
+// strikethrough, code, links. Everything else - including images and raw HTML - comes out as
+// the text the agent wrote. Every new block reuses renderInline, so all text is escaped before
+// any tag is added.
 export function renderChatMarkdown(text) {
-  const lines = String(text || "")
-    .replace(/\r\n?/g, "\n")
-    .split("\n");
+  return renderBlocks(
+    String(text || "")
+      .replace(/\r\n?/g, "\n")
+      .split("\n"),
+    0,
+  );
+}
+
+// depth 是当前引用嵌套层数；到 MAX_QUOTE_DEPTH 后 `>` 行按普通段落输出。
+function renderBlocks(lines, depth) {
+  const quotes = depth < MAX_QUOTE_DEPTH;
   const out = [];
   let i = 0;
   while (i < lines.length) {
@@ -352,10 +419,36 @@ export function renderChatMarkdown(text) {
       i += 1;
       continue;
     }
+    if (THEMATIC_BREAK.test(line)) {
+      out.push("<hr>");
+      i += 1;
+      continue;
+    }
+    if (quotes && QUOTE_LINE.test(line)) {
+      const inner = [];
+      while (i < lines.length && QUOTE_LINE.test(lines[i])) {
+        inner.push(/** @type {RegExpExecArray} */ (QUOTE_LINE.exec(lines[i]))[1]);
+        i += 1;
+      }
+      out.push("<blockquote>" + renderBlocks(inner, depth + 1) + "</blockquote>");
+      continue;
+    }
+    if (isTableStart(lines, i)) {
+      const header = line;
+      const delimiter = lines[i + 1];
+      const rows = [];
+      i += 2;
+      while (i < lines.length && lines[i].trim() && lines[i].includes("|") && !BLOCK_START.test(lines[i])) {
+        rows.push(lines[i]);
+        i += 1;
+      }
+      out.push(renderTable(header, delimiter, rows));
+      continue;
+    }
     if (LIST_ITEM.test(line)) {
       const items = [];
-      while (i < lines.length && LIST_ITEM.test(lines[i])) {
-        const item = LIST_ITEM.exec(lines[i]);
+      while (i < lines.length && LIST_ITEM.test(lines[i]) && !THEMATIC_BREAK.test(lines[i])) {
+        const item = /** @type {RegExpExecArray} */ (LIST_ITEM.exec(lines[i]));
         const ordered = /\d/.test(item[2]);
         const start = ordered ? item[2].replace(/[.)]$/, "").replace(/^0+(?=\d)/, "") : "";
         items.push({ indent: item[1].length, ordered, start, text: item[3] });
@@ -370,7 +463,14 @@ export function renderChatMarkdown(text) {
     }
     const buffer = [line];
     i += 1;
-    while (i < lines.length && lines[i].trim() && !BLOCK_START.test(lines[i])) {
+    // 段落遇到其他块（含分隔线和表格起始）就断开，agent 常写「结论：」紧跟一张表。
+    while (
+      i < lines.length &&
+      lines[i].trim() &&
+      !BLOCK_START.test(lines[i]) &&
+      !THEMATIC_BREAK.test(lines[i]) &&
+      !isTableStart(lines, i)
+    ) {
       buffer.push(lines[i]);
       i += 1;
     }

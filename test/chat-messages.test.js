@@ -19,7 +19,7 @@ import {
 } from "../src/chat-messages.js";
 
 // The renderer is what turns an agent's `--agent-reply` into something a reviewer can scan in a
-// 360px column. It is a deliberate subset: every rule below is one the reply needs, and anything
+// narrow column. It is a deliberate subset: every rule below is one the reply needs, and anything
 // outside it must come out as the text the agent wrote, never as markup it did not write.
 
 test("paragraphs split on blank lines and a single newline is a line break", () => {
@@ -128,15 +128,97 @@ test("raw html is escaped, never interpreted", () => {
   );
 });
 
-test("tables are left as the lines the agent wrote", () => {
-  assert.equal(renderChatMarkdown("| a | b |\n|---|---|\n| 1 | 2 |"), "<p>| a | b |<br>|---|---|<br>| 1 | 2 |</p>");
+const TABLE_OPEN = '<div class="chat-table"><table>';
+
+test("GFM tables render with alignment, inline markup, and padded or trimmed rows", () => {
+  assert.equal(
+    renderChatMarkdown("| # | 名称 | 数量 |\n|:--|:-:|--:|\n| 1 | **a** ~~b~~ | `x|` |\n| 2 |\n| 3 | c | d | extra |"),
+    TABLE_OPEN +
+      '<thead><tr><th style="text-align:left">#</th><th style="text-align:center">名称</th><th style="text-align:right">数量</th></tr></thead>' +
+      '<tbody><tr><td style="text-align:left">1</td><td style="text-align:center"><strong>a</strong> <del>b</del></td><td style="text-align:right">`x</td></tr>' +
+      '<tr><td style="text-align:left">2</td><td style="text-align:center"></td><td style="text-align:right"></td></tr>' +
+      '<tr><td style="text-align:left">3</td><td style="text-align:center">c</td><td style="text-align:right">d</td></tr></tbody></table></div>',
+  );
 });
 
-test("unsupported quotes and rules remain text, and CRLF input is normalized", () => {
+test("a table interrupts a paragraph, ends at a blank line, and keeps escaped pipes", () => {
   assert.equal(
-    renderChatMarkdown("> quoted **bold**\r\n> second\r\n\r\n---\r\n\r\nend"),
-    "<p>&gt; quoted <strong>bold</strong><br>&gt; second</p><p>---</p><p>end</p>",
+    renderChatMarkdown("结论：\na \\| b | c\n--|--\nx | y\n\nafter"),
+    "<p>结论：</p>" +
+      TABLE_OPEN +
+      "<thead><tr><th>a | b</th><th>c</th></tr></thead><tbody><tr><td>x</td><td>y</td></tr></tbody></table></div><p>after</p>",
   );
+});
+
+test("pipe lines without a matching delimiter row stay as the text the agent wrote", () => {
+  assert.equal(renderChatMarkdown("| a | b |\n|---|\n| 1 | 2 |"), "<p>| a | b |<br>|---|<br>| 1 | 2 |</p>");
+  assert.equal(renderChatMarkdown("a | b\nc | d"), "<p>a | b<br>c | d</p>");
+});
+
+test("table cells escape raw html and keep non-http links literal", () => {
+  assert.equal(
+    renderChatMarkdown(
+      '| <script>alert(1)</script> | x |\n|---|---|\n| [a](javascript:alert(1)) | <img src=x onerror=alert(1)> |\n| " onmouseover="alert(1) | [ok](https://e.test/"x) |',
+    ),
+    TABLE_OPEN +
+      "<thead><tr><th>&lt;script&gt;alert(1)&lt;/script&gt;</th><th>x</th></tr></thead>" +
+      "<tbody><tr><td>[a](javascript:alert(1))</td><td>&lt;img src=x onerror=alert(1)&gt;</td></tr>" +
+      '<tr><td>&quot; onmouseover=&quot;alert(1)</td><td><a href="https://e.test/&quot;x" target="_blank" rel="noopener noreferrer">ok</a></td></tr></tbody></table></div>',
+  );
+});
+
+test("an alignment colon never reaches the style attribute as input", () => {
+  const html = renderChatMarkdown('| a |\n| :-: |\n| b |\n\n| c |\n|"-|\n| d |');
+  assert.match(html, /^<div class="chat-table"><table><thead><tr><th style="text-align:center">a<\/th>/);
+  assert.ok(html.endsWith("<p>| c |<br>|&quot;-|<br>| d |</p>"), html);
+});
+
+test("block quotes nest, render their own blocks, and stop at the depth cap", () => {
+  assert.equal(
+    renderChatMarkdown("> quoted **bold**\r\n> second\r\n>> inner\r\n\r\nend"),
+    "<blockquote><p>quoted <strong>bold</strong><br>second</p><blockquote><p>inner</p></blockquote></blockquote><p>end</p>",
+  );
+  assert.equal(
+    renderChatMarkdown("> - a\n> - b\n>\n> | x | y |\n> |---|---|\n> | 1 | 2 |"),
+    "<blockquote><ul><li>a</li><li>b</li></ul>" +
+      TABLE_OPEN +
+      "<thead><tr><th>x</th><th>y</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table></div></blockquote>",
+  );
+  const deep = renderChatMarkdown(">".repeat(12) + " deep");
+  assert.equal(deep, "<blockquote>".repeat(8) + "<p>&gt;&gt;&gt;&gt; deep</p>" + "</blockquote>".repeat(8));
+});
+
+test("quotes escape raw html like any other text", () => {
+  assert.equal(
+    renderChatMarkdown("> <script>alert(1)</script> [x](javascript:alert(1))"),
+    "<blockquote><p>&lt;script&gt;alert(1)&lt;/script&gt; [x](javascript:alert(1))</p></blockquote>",
+  );
+});
+
+test("thematic breaks render as rules and break a paragraph, and CRLF input is normalized", () => {
+  assert.equal(
+    renderChatMarkdown("above\r\n---\r\n* * *\r\n___\r\n- - -\r\n- item\r\n--\r\nend"),
+    "<p>above</p><hr><hr><hr><hr><ul><li>item</li></ul><p>--<br>end</p>",
+  );
+});
+
+test("strikethrough needs a closed double tilde and stays literal in code", () => {
+  assert.equal(
+    renderChatMarkdown("~~gone~~ and ~single~ and ~~open and `~~code~~`"),
+    "<p><del>gone</del> and ~single~ and ~~open and <code>~~code~~</code></p>",
+  );
+});
+
+test("pathological table, quote, and rule input renders without stalling", () => {
+  const n = 200_000;
+  const started = performance.now();
+  renderChatMarkdown("a | b\n| -" + " ".repeat(n) + "x");
+  renderChatMarkdown("a | b\n" + "|-".repeat(n) + "x");
+  renderChatMarkdown("- ".repeat(n) + "x");
+  renderChatMarkdown(">".repeat(n));
+  renderChatMarkdown("x|y\n".repeat(n / 4));
+  const elapsed = performance.now() - started;
+  assert.ok(elapsed < 10_000, `render took ${Math.round(elapsed)}ms`);
 });
 
 test("empty and non-string input render nothing", () => {

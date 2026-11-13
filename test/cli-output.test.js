@@ -2957,7 +2957,15 @@ test("shouldRestartServer adopts a server that is newer than the CLI", () => {
 test("shouldRestartServer replaces a server whose version is not plain x.y.z", () => {
   assert.equal(shouldRestartServer("0.1.87", { ok: true, app: "lavish-axi", version: "0.1.87-beta.1" }), true);
   assert.equal(shouldRestartServer("0.1.87", { ok: true, app: "lavish-axi", version: "v0.1.88" }), true);
-  assert.equal(shouldRestartServer("0.1.87-beta.1", { ok: true, app: "lavish-axi", version: "0.1.88" }), true);
+});
+
+// fork 版本号（0.1.96-jq.1）：按数字主版本比较，主版本相同但字符串不同仍替换。
+test("shouldRestartServer orders a suffixed fork version by its numeric core", () => {
+  assert.equal(shouldRestartServer("0.1.96-jq.1", { ok: true, app: "lavish-axi", version: "0.1.97" }), false);
+  assert.equal(shouldRestartServer("0.1.96-jq.1", { ok: true, app: "lavish-axi", version: "0.1.94" }), true);
+  assert.equal(shouldRestartServer("0.1.96-jq.1", { ok: true, app: "lavish-axi", version: "0.1.96" }), true);
+  assert.equal(shouldRestartServer("0.1.96-jq.2", { ok: true, app: "lavish-axi", version: "0.1.96-jq.1" }), true);
+  assert.equal(shouldRestartServer("0.1.96-jq.1", { ok: true, app: "lavish-axi", version: "0.1.96-jq.1" }), false);
 });
 
 test("shouldRestartServer compares versions numerically, not as strings", () => {
