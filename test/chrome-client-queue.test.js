@@ -5935,7 +5935,7 @@ test("chrome send and end carries the end intent with queued prompts", async () 
   assert.equal(chrome.element("chatInput").disabled, true);
 });
 
-test("chrome send and end with an empty composer nudges instead of ending", async () => {
+test("chrome send and end with an empty composer ends the session like End session", async () => {
   const posts = [];
   const chrome = await createChromeHarness({
     fetchImpl: async (url, init = {}) => {
@@ -5948,15 +5948,44 @@ test("chrome send and end with an empty composer nudges instead of ending", asyn
   chrome.element("sendAndEnd").onclick();
   await flushPromises();
 
-  assert.equal(posts.length, 0);
-  assert.equal(chrome.postedToFrame.length, 0);
-  assert.equal(chrome.element("sendHint").hidden, false);
-  assert.match(chrome.element("sendHint").textContent, /End session/);
-  assert.equal(chrome.element("chatInput").focused, true);
-  assert.equal(chrome.element("chatInput").disabled, false);
+  // Nothing to deliver, so no snapshot round-trip and no prompt POST: only the same /end call the
+  // More menu's End session makes.
+  assert.deepEqual(posts, [{ url: "/api/abc/end", body: null }]);
+  assert.equal(
+    chrome.postedToFrame.some((message) => message.type === "lavish:requestSnapshot"),
+    false,
+  );
+  assert.equal(chrome.element("sendHint").hidden, true);
+  assert.equal(chrome.element("endedOverlay").hidden, false);
+  assert.equal(chrome.element("chatInput").disabled, true);
+  assert.equal(chrome.element("sendAndEnd").disabled, true);
 });
 
-test("chrome send and end nudges toward End session when preparation leaves the queue empty", async () => {
+test("chrome send and end with composer text sends it with the end intent instead of a bare end", async () => {
+  const posts = [];
+  const chrome = await createChromeHarness({
+    fetchImpl: async (url, init = {}) => {
+      posts.push({ url, body: init.body ? JSON.parse(init.body) : null });
+      return { ok: true };
+    },
+  });
+  chrome.element("chatInput").value = "Looks good, ship it";
+
+  chrome.element("sendAndEnd").onclick();
+  chrome.sendSnapshot("uid=1 body");
+  await flushPromises();
+  await flushPromises();
+
+  assert.deepEqual(
+    posts.map((post) => post.url),
+    ["/api/abc/prompts"],
+  );
+  assert.equal(posts[0].body.endSession, true);
+  assert.equal(posts[0].body.prompts[0].prompt, "Looks good, ship it");
+  assert.equal(chrome.element("chatInput").disabled, true);
+});
+
+test("chrome send and end ends the session when preparation leaves the queue empty", async () => {
   const posts = [];
   let finishPreparation = () => {};
   const preparation = new Promise((resolve) => {
@@ -5987,9 +6016,8 @@ test("chrome send and end nudges toward End session when preparation leaves the 
     posts.some((post) => String(post.url).endsWith("/prompts")),
     false,
   );
-  assert.equal(chrome.element("sendHint").hidden, false);
-  assert.match(chrome.element("sendHint").textContent, /End session/);
-  assert.equal(chrome.element("sendAndEnd").disabled, false);
+  assert.equal(posts.filter((post) => String(post.url).endsWith("/end")).length, 1);
+  assert.equal(chrome.element("endedOverlay").hidden, false);
 });
 
 test("an oversized terminal snapshot retries once without optional DOM context", async () => {

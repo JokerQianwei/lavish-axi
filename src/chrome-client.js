@@ -798,7 +798,6 @@ const UNSENT_OWNERSHIP_COPY =
   "Unsent answers stay in the tab or window where you entered them; taking over in another window does not bring them along.";
 const DEFAULT_SEND_HINT = "Nothing queued in this tab. " + UNSENT_OWNERSHIP_COPY;
 const EMPTY_SEND_HINT_HOLD_MS = 9000;
-const EMPTY_END_HINT = "Nothing to send. To end without feedback, use End session in the More menu (⋮).";
 
 function showSendHint(message = DEFAULT_SEND_HINT, holdMs = 2600, focusInput = true) {
   sendHint.textContent = message;
@@ -2380,10 +2379,13 @@ function sendQueued(endAfter) {
   const shouldEnd = Boolean(endAfter && !chipsBlocked);
   const preparations = shouldEnd ? [...feedbackPreparations] : [];
   if (!queued.length && preparations.length === 0) {
-    if (!chipsBlocked && !sendFailureOwner) {
-      if (endAfter) showSendHint(EMPTY_END_HINT);
-      else showSendHint(DEFAULT_SEND_HINT, EMPTY_SEND_HINT_HOLD_MS);
+    // 无可发送内容时，Send & End 就是「不带反馈直接结束」：复用 More 菜单 End session 的同一个
+    // endSession，不另起结束流程。被附件卡住时 shouldEnd 为 false，仍按原逻辑不结束。
+    if (shouldEnd) {
+      endSession();
+      return;
     }
+    if (!chipsBlocked && !sendFailureOwner) showSendHint(DEFAULT_SEND_HINT, EMPTY_SEND_HINT_HOLD_MS);
     return;
   }
   if (!sendFailureOwner) hideSendHint(true);
@@ -2432,8 +2434,9 @@ function completeTerminalPreparation(terminal, results) {
   terminal.prompts = queued.slice();
   clearPreparationFailure("terminal");
   if (!terminal.prompts.length) {
+    // 准备完成后仍无可发送内容：先释放终止预留（endSession 只认当前预留或无预留），再按空 Send & End 直接结束。
     releaseTerminalSubmission(terminal);
-    if (!sendFailureOwner) showSendHint(EMPTY_END_HINT);
+    endSession();
     return;
   }
   // Only make the reservation durable once every preparation has joined the exact
