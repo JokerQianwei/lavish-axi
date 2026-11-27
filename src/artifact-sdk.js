@@ -921,12 +921,9 @@ export function createArtifactSdk(
     if (el === document.documentElement || el === document.body) return true;
     const parent = el?.parentElement;
     if (!parent) return false;
-    const main = el.tagName === "MAIN" || el.getAttribute("role") === "main";
-    const mount = main ? parent : el;
-    return (
-      (main && mount === document.body) ||
-      (mount.parentElement === document.body && (mount.id === "app" || mount.id === "root"))
-    );
+    const main = 'main, [role="main"]';
+    if (el.matches(main)) return !parent.closest(main);
+    return parent === document.body && (el.id === "app" || el.id === "root" || el.querySelector(main) !== null);
   }
 
   // ---------------------------------------------------------------------------
