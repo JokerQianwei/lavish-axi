@@ -916,6 +916,16 @@ export function createArtifactSdk(
     return mermaidNodeElement(el) || el;
   }
 
+  // 页面外壳的空白不是批注目标；只判断命中的元素，保留内部节点和文字的批注。
+  function isPageBackground(el) {
+    return (
+      el === document.documentElement ||
+      el === document.body ||
+      (el?.parentElement === document.body &&
+        (el.tagName === "MAIN" || el.getAttribute("role") === "main" || el.id === "app" || el.id === "root"))
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // Mermaid diagram enhancement: pan/zoom in explore mode, freeze in annotate
   // mode. All of this operates on the rendered SVG only; the saved artifact is
@@ -2670,6 +2680,7 @@ export function createArtifactSdk(
     (event) => {
       if (
         !annotationMode ||
+        isPageBackground(event.target) ||
         isLavishUi(event.target) ||
         isLavishAction(event.target) ||
         isInteractiveControl(event.target)
@@ -2725,6 +2736,11 @@ export function createArtifactSdk(
         isInteractiveControl(event.target)
       )
         return;
+      if (isPageBackground(event.target)) {
+        // 选中文字后的 click 也可能落到页面外壳，不能让下一次元素点击被吞掉。
+        ignoreNextClick = false;
+        return;
+      }
       // Cmd-click (macOS) or Ctrl-click (elsewhere) on a link follows it (the browser opens a new
       // tab) instead of annotating, so links stay usable without leaving annotate mode. Meta off
       // macOS is the Super/Windows key, not a follow gesture, so it annotates like a plain click.

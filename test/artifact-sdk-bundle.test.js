@@ -48,7 +48,9 @@ function createElement(tag) {
           const bracket = selector.indexOf("[");
           const tag = bracket >= 0 ? selector.slice(0, bracket) : selector;
           if (tag && tag !== element.tagName.toLowerCase()) return false;
-          return bracket < 0 || attributes.has(selector.slice(bracket + 1, selector.indexOf("]")).split("=")[0]);
+          if (bracket < 0) return true;
+          const [name, value] = selector.slice(bracket + 1, selector.indexOf("]")).split("=");
+          return value === undefined ? attributes.has(name) : attributes.get(name) === value.slice(1, -1);
         });
     },
     closest(selectorList) {
@@ -362,6 +364,46 @@ function bootSdk({
       return posted.at(-1);
     },
   };
+}
+
+test("a fresh review starts with no annotation card", () => {
+  const sdk = bootSdk();
+  assert.equal(sdk.cards().length, 0);
+});
+
+/** @type {[string, (sdk: ReturnType<typeof bootSdk>) => any][]} */
+const pageBackgrounds = [
+  ["html", (sdk) => sdk.document.documentElement],
+  ["body", (sdk) => sdk.body],
+  ["top-level main", (sdk) => appendTo(sdk.body, createElement("main"))],
+  [
+    "top-level main landmark",
+    (sdk) => {
+      const landmark = appendTo(sdk.body, createElement("div"));
+      landmark.setAttribute("role", "main");
+      return landmark;
+    },
+  ],
+  ...["app", "root"].map(
+    (id) =>
+      /** @type {[string, (sdk: ReturnType<typeof bootSdk>) => any]} */ ([
+        `top-level #${id}`,
+        (sdk) => Object.assign(appendTo(sdk.body, createElement("div")), { id }),
+      ]),
+  ),
+];
+
+for (const [label, pageBackground] of pageBackgrounds) {
+  test(`clicks on ${label} do not open an annotation card or consume the click`, () => {
+    const sdk = bootSdk();
+    const target = pageBackground(sdk);
+    assert.equal(sdk.click(target).defaultPrevented, false);
+    assert.equal(sdk.cards().length, 0);
+
+    const paragraph = appendTo(target === sdk.document.documentElement ? sdk.body : target, cell("p", "Review me"));
+    assert.equal(sdk.click(paragraph).defaultPrevented, true);
+    assert.match(sdk.card().innerHTML, /Annotate &lt;p&gt;/);
+  });
 }
 
 for (const { label, attributes, enabled } of [
