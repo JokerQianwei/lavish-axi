@@ -29,8 +29,8 @@ function createElement(tag) {
     classList: {
       add() {},
       remove() {},
-      contains() {
-        return false;
+      contains(name) {
+        return (attributes.get("class") || "").split(/\s+/).includes(name);
       },
     },
     setAttribute(name, value) {
@@ -48,9 +48,7 @@ function createElement(tag) {
           const bracket = selector.indexOf("[");
           const tag = bracket >= 0 ? selector.slice(0, bracket) : selector;
           if (tag && tag !== element.tagName.toLowerCase()) return false;
-          if (bracket < 0) return true;
-          const [name, value] = selector.slice(bracket + 1, selector.indexOf("]")).split("=");
-          return value === undefined ? attributes.has(name) : attributes.get(name) === value.slice(1, -1);
+          return bracket < 0 || attributes.has(selector.slice(bracket + 1, selector.indexOf("]")).split("=")[0]);
         });
     },
     closest(selectorList) {
@@ -73,11 +71,6 @@ function createElement(tag) {
     // Card internals are looked up by class after innerHTML is assigned, so hand back a stable
     // stub per selector: the test drives the very buttons the SDK wired up.
     querySelector(selector) {
-      for (const child of element.children) {
-        const match = child.matches(selector) ? child : child.querySelector(selector);
-        if (match) return match;
-      }
-      if (!element.innerHTML) return null;
       if (!queried.has(selector)) queried.set(selector, createElement(selector.replace(/^[.#]/, "")));
       return queried.get(selector);
     },
@@ -379,49 +372,11 @@ const pageBackgrounds = [
   ["body", (sdk) => sdk.body],
   ["top-level main", (sdk) => appendTo(sdk.body, createElement("main"))],
   [
-    "top-level main landmark",
+    "top-level div.page",
     (sdk) => {
-      const landmark = appendTo(sdk.body, createElement("div"));
-      landmark.setAttribute("role", "main");
-      return landmark;
-    },
-  ],
-  ...["app", "root"].map(
-    (id) =>
-      /** @type {[string, (sdk: ReturnType<typeof bootSdk>) => any]} */ ([
-        `top-level #${id}`,
-        (sdk) => Object.assign(appendTo(sdk.body, createElement("div")), { id }),
-      ]),
-  ),
-  [
-    "top-level #__next containing a main landmark",
-    (sdk) => {
-      const mount = Object.assign(appendTo(sdk.body, createElement("div")), { id: "__next" });
-      appendTo(mount, createElement("main"));
-      return mount;
-    },
-  ],
-  ...["app", "root", "__next"].flatMap((id) =>
-    ["main", "div"].map(
-      (tag) =>
-        /** @type {[string, (sdk: ReturnType<typeof bootSdk>) => any]} */ ([
-          `#${id} > ${tag === "main" ? "main" : '[role="main"]'}`,
-          (sdk) => {
-            const mount = Object.assign(appendTo(sdk.body, createElement("div")), { id });
-            const landmark = appendTo(mount, createElement(tag));
-            if (tag === "div") landmark.setAttribute("role", "main");
-            return landmark;
-          },
-        ]),
-    ),
-  ),
-  [
-    "main landmark below a layout wrapper",
-    (sdk) => {
-      const mount = Object.assign(appendTo(sdk.body, createElement("div")), { id: "root" });
-      const landmark = appendTo(appendTo(mount, createElement("div")), createElement("div"));
-      landmark.setAttribute("role", "main");
-      return landmark;
+      const page = appendTo(sdk.body, createElement("div"));
+      page.setAttribute("class", "page");
+      return page;
     },
   ],
 ];
@@ -445,12 +400,12 @@ for (const [label, pageBackground] of pageBackgrounds) {
   });
 }
 
-test("a landmark inside the page's main remains annotatable", () => {
+test("a div.page inside the page's main remains annotatable", () => {
   const sdk = bootSdk();
-  const content = appendTo(appendTo(sdk.body, createElement("main")), cell("section", "Review me"));
-  content.setAttribute("role", "main");
+  const content = appendTo(appendTo(sdk.body, createElement("main")), cell("div", "Review me"));
+  content.setAttribute("class", "page");
   assert.equal(sdk.click(content).defaultPrevented, true);
-  assert.match(sdk.card().innerHTML, /Annotate &lt;section&gt;/);
+  assert.match(sdk.card().innerHTML, /Annotate &lt;div&gt;/);
 });
 
 for (const { label, attributes, enabled } of [

@@ -916,14 +916,14 @@ export function createArtifactSdk(
     return mermaidNodeElement(el) || el;
   }
 
-  // 页面外壳的空白不是批注目标；只判断命中的元素，保留内部节点和文字的批注。
+  // 审阅模板的外壳是 body 下的 main 或 div.page。只判命中的元素，内部正文仍可批注。
   function isPageBackground(el) {
-    if (el === document.documentElement || el === document.body) return true;
-    const parent = el?.parentElement;
-    if (!parent) return false;
-    const main = 'main, [role="main"]';
-    if (el.matches(main)) return !parent.closest(main);
-    return parent === document.body && (el.id === "app" || el.id === "root" || el.querySelector(main) !== null);
+    return (
+      el === document.documentElement ||
+      el === document.body ||
+      (el?.parentElement === document.body &&
+        (el.tagName === "MAIN" || (el.tagName === "DIV" && el.classList.contains("page"))))
+    );
   }
 
   // ---------------------------------------------------------------------------
