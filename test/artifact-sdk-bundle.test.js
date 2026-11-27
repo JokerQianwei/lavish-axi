@@ -29,8 +29,8 @@ function createElement(tag) {
     classList: {
       add() {},
       remove() {},
-      contains() {
-        return false;
+      contains(name) {
+        return (attributes.get("class") || "").split(/\s+/).includes(name);
       },
     },
     setAttribute(name, value) {
@@ -74,7 +74,7 @@ function createElement(tag) {
       if (!queried.has(selector)) queried.set(selector, createElement(selector.replace(/^[.#]/, "")));
       return queried.get(selector);
     },
-    querySelectorAll() {
+    querySelectorAll(_selector = "") {
       return [];
     },
     getBoundingClientRect() {
@@ -89,12 +89,9 @@ function createElement(tag) {
     scrollIntoView() {},
     attachShadow() {
       const shadowRoot = createElement("shadow-root");
-      // A new Reveal drops the previous marker by querying the shadow root for its class, so that
-      // query answers with the markers actually appended there.
       shadowRoot.querySelectorAll = (selector) =>
-        selector === ".lavish-reveal-marker"
-          ? shadowRoot.children.filter((child) => child.className === "lavish-reveal-marker")
-          : [];
+        shadowRoot.children.filter((child) => `.${child.className}` === selector);
+      shadowRoot.querySelector = (selector) => shadowRoot.querySelectorAll(selector)[0] ?? null;
       element.shadowRoot = shadowRoot;
       return shadowRoot;
     },
@@ -364,6 +361,53 @@ function bootSdk({
   };
 }
 
+test("a fresh review starts with no annotation card", () => {
+  const sdk = bootSdk();
+  assert.equal(sdk.cards().length, 0);
+});
+
+/** @type {[string, (sdk: ReturnType<typeof bootSdk>) => any][]} */
+const pageBackgrounds = [
+  ["html", (sdk) => sdk.document.documentElement],
+  ["body", (sdk) => sdk.body],
+  ["top-level main", (sdk) => appendTo(sdk.body, createElement("main"))],
+  [
+    "top-level div.page",
+    (sdk) => {
+      const page = appendTo(sdk.body, createElement("div"));
+      page.setAttribute("class", "page");
+      return page;
+    },
+  ],
+];
+
+for (const [label, pageBackground] of pageBackgrounds) {
+  test(`clicks on ${label} do not open an annotation card or consume the click`, () => {
+    const sdk = bootSdk();
+    const target = pageBackground(sdk);
+    assert.equal(sdk.click(target).defaultPrevented, false);
+    assert.equal(sdk.cards().length, 0);
+
+    const paragraph = appendTo(target === sdk.document.documentElement ? sdk.body : target, cell("p", "Review me"));
+    assert.equal(sdk.click(paragraph).defaultPrevented, true);
+    const draft = sdk.card();
+    assert.match(draft.innerHTML, /Annotate &lt;p&gt;/);
+    draft.querySelector("textarea").value = "Unsent note";
+
+    assert.equal(sdk.click(target).defaultPrevented, false);
+    assert.equal(sdk.card(), draft);
+    assert.equal(sdk.card().querySelector("textarea").value, "Unsent note");
+  });
+}
+
+test("a div.page inside the page's main remains annotatable", () => {
+  const sdk = bootSdk();
+  const content = appendTo(appendTo(sdk.body, createElement("main")), cell("div", "Review me"));
+  content.setAttribute("class", "page");
+  assert.equal(sdk.click(content).defaultPrevented, true);
+  assert.match(sdk.card().innerHTML, /Annotate &lt;div&gt;/);
+});
+
 for (const { label, attributes, enabled } of [
   { label: "default", attributes: {}, enabled: true },
   { label: "html off", attributes: { htmlAnnotate: "off" }, enabled: false },
@@ -413,8 +457,7 @@ test("the chrome can turn annotation on and off after a page declares off", () =
   assert.equal(sdk.cards().length, 1);
   sdk.sendChromeMessage({ type: "lavish:setAnnotationMode", enabled: false });
   assert.equal(sdk.click(target).defaultPrevented, false);
-  // This harness retains closed cards; no new card should appear while disabled.
-  assert.equal(sdk.cards().length, 1);
+  assert.equal(sdk.cards().length, 0);
   sdk.runTimers();
   const state = sdk.posted.filter((message) => message.type === "lavish:reviewState").at(-1);
   assert.equal(state.state.card, null, "turning annotation off closes the active card");
@@ -799,13 +842,12 @@ test("the served SDK bundle drops a late restore once the user has opened a card
   const paragraph = appendTo(sdk.body, cell("p", "Just prose"));
   sdk.click(paragraph);
   sdk.card().querySelector(".lavish-cancel").onclick();
-  const cardsAfterCancel = sdk.cards().length;
+  assert.equal(sdk.cards().length, 0);
 
   late = appendTo(sdk.body, cell("h1", "Headline"));
   sdk.runTimers();
 
-  assert.equal(sdk.cards().length, cardsAfterCancel, "the cancelled card is not replaced by a restored one");
-  assert.notEqual(sdk.card().querySelector("textarea").value, "needs a shorter headline");
+  assert.equal(sdk.cards().length, 0, "the cancelled card is not replaced by a restored one");
   assert.equal(
     sdk.posted.some((message) => message.type === "lavish:reviewDraftUnrestorable"),
     false,
@@ -818,7 +860,6 @@ test("clicking an element with a queued note asks the chrome to edit it instead 
   sdk.click(paragraph);
   const queued = sdk.queue("Reword this");
   sdk.sendChromeMessage({ type: "lavish:queuedAnchors", selectors: [queued.prompt.selector] });
-  // The stub shadow root keeps closed cards, so a new card shows as a higher count.
   const cardsBefore = sdk.cards().length;
 
   sdk.click(paragraph);
