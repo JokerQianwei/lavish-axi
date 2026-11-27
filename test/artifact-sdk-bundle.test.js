@@ -391,6 +391,20 @@ const pageBackgrounds = [
         (sdk) => Object.assign(appendTo(sdk.body, createElement("div")), { id }),
       ]),
   ),
+  ...["app", "root"].flatMap((id) =>
+    ["main", "div"].map(
+      (tag) =>
+        /** @type {[string, (sdk: ReturnType<typeof bootSdk>) => any]} */ ([
+          `#${id} > ${tag === "main" ? "main" : '[role="main"]'}`,
+          (sdk) => {
+            const mount = Object.assign(appendTo(sdk.body, createElement("div")), { id });
+            const landmark = appendTo(mount, createElement(tag));
+            if (tag === "div") landmark.setAttribute("role", "main");
+            return landmark;
+          },
+        ]),
+    ),
+  ),
 ];
 
 for (const [label, pageBackground] of pageBackgrounds) {
@@ -402,7 +416,13 @@ for (const [label, pageBackground] of pageBackgrounds) {
 
     const paragraph = appendTo(target === sdk.document.documentElement ? sdk.body : target, cell("p", "Review me"));
     assert.equal(sdk.click(paragraph).defaultPrevented, true);
-    assert.match(sdk.card().innerHTML, /Annotate &lt;p&gt;/);
+    const draft = sdk.card();
+    assert.match(draft.innerHTML, /Annotate &lt;p&gt;/);
+    draft.querySelector("textarea").value = "Unsent note";
+
+    assert.equal(sdk.click(target).defaultPrevented, false);
+    assert.equal(sdk.card(), draft);
+    assert.equal(sdk.card().querySelector("textarea").value, "Unsent note");
   });
 }
 

@@ -918,11 +918,14 @@ export function createArtifactSdk(
 
   // 页面外壳的空白不是批注目标；只判断命中的元素，保留内部节点和文字的批注。
   function isPageBackground(el) {
+    if (el === document.documentElement || el === document.body) return true;
+    const parent = el?.parentElement;
+    if (!parent) return false;
+    const main = el.tagName === "MAIN" || el.getAttribute("role") === "main";
+    const mount = main ? parent : el;
     return (
-      el === document.documentElement ||
-      el === document.body ||
-      (el?.parentElement === document.body &&
-        (el.tagName === "MAIN" || el.getAttribute("role") === "main" || el.id === "app" || el.id === "root"))
+      (main && mount === document.body) ||
+      (mount.parentElement === document.body && (mount.id === "app" || mount.id === "root"))
     );
   }
 
