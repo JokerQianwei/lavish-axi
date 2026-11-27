@@ -74,7 +74,7 @@ function createElement(tag) {
       if (!queried.has(selector)) queried.set(selector, createElement(selector.replace(/^[.#]/, "")));
       return queried.get(selector);
     },
-    querySelectorAll() {
+    querySelectorAll(_selector = "") {
       return [];
     },
     getBoundingClientRect() {
