@@ -103,8 +103,12 @@ async function createChromeHarness({
   // and chrome.css's media rules report. Its matchMedia answers the width queries from `innerWidth`
   // and the pointer query from `coarse`, the way a real browser would.
   device = null,
+  // Opt-in system appearance ("light" or "dark") answered by a desktop matchMedia for
+  // prefers-color-scheme; `setSystemTheme` flips it the way the OS appearance setting would.
+  systemTheme = null,
 } = {}) {
   const source = await readFile(sourceUrl, "utf8");
+  let currentSystemTheme = systemTheme;
   // Seed sessionStorage before the client boots, to model a tab whose queue was
   // already persisted by an earlier page load.
   if (storedQueue) storage.set(`lavish-axi:queued:${sessionData.key}`, JSON.stringify(storedQueue));
@@ -539,7 +543,14 @@ async function createChromeHarness({
   const mediaQueries = [];
   const historyReplacements = [];
   const rootProperties = new Map();
+  const rootAttributes = new Map();
   const documentElement = {
+    setAttribute(name, value) {
+      rootAttributes.set(name, String(value));
+    },
+    getAttribute(name) {
+      return rootAttributes.get(name) ?? null;
+    },
     style: {
       zoom: "",
       setProperty(name, value) {
@@ -577,6 +588,19 @@ async function createChromeHarness({
         matches: width
           ? device.innerWidth <= Number(width[1])
           : query === "(pointer: coarse)" && Boolean(device.coarse),
+        changeHandlers: [],
+        addEventListener(type, handler) {
+          if (type === "change") this.changeHandlers.push(handler);
+        },
+      };
+      mediaQueries.push(list);
+      return list;
+    };
+  } else if (currentSystemTheme) {
+    context.window.matchMedia = (query) => {
+      const list = {
+        media: query,
+        matches: query === "(prefers-color-scheme: light)" && currentSystemTheme === "light",
         changeHandlers: [],
         addEventListener(type, handler) {
           if (type === "change") this.changeHandlers.push(handler);
@@ -748,6 +772,14 @@ async function createChromeHarness({
     artifactBeginRequests,
     artifactLoadToken: frameLoadToken,
     mediaQueries,
+    setSystemTheme(theme) {
+      currentSystemTheme = theme;
+      for (const list of mediaQueries) {
+        if (list.media !== "(prefers-color-scheme: light)") continue;
+        list.matches = theme === "light";
+        for (const handler of list.changeHandlers) handler({ matches: list.matches });
+      }
+    },
     documentElement,
     historyReplacements,
     // The browser resizing the layout viewport (an on-screen keyboard, a rotation), then firing
@@ -7328,8 +7360,9 @@ test("desktop chrome never turns the conversation panel into a sheet", async () 
 test("phone chrome boots with the conversation docked and raises it on tap", async () => {
   const chrome = await createChromeHarness({ mobile: true });
 
-  assert.equal(chrome.mediaQueries.length, 1);
-  assert.match(chrome.mediaQueries[0].media, /max-width/);
+  // The theme also watches prefers-color-scheme; the sheet registers exactly one width query.
+  const widthQueries = chrome.mediaQueries.filter((query) => /max-width/.test(query.media));
+  assert.equal(widthQueries.length, 1);
   const docked = sheetState(chrome);
   assert.equal(docked.open, false);
   // The hidden part of the sheet must be unreachable: a focus landing in the off-screen
@@ -10001,4 +10034,76 @@ test("the layout menu item cycles Auto, Phone, Desktop and is remembered on the 
     device: { screen: { width: 1920, height: 1080 }, innerWidth: 1280, innerHeight: 900, coarse: false },
   });
   assert.equal(later.element("layoutToggleText").textContent, "Layout: Phone");
+});
+
+// ---- Theme ----
+// 主题偏好的契约（来自需求）：默认跟随系统；More 菜单按 跟随系统 → 浅色 → 深色 循环；
+// 选择存 localStorage（lavish-axi:theme），刷新后保留；切换时通知作品 iframe 里的批注卡。
+
+function rootTheme(chrome) {
+  return chrome.element("documentElement")["data-theme"];
+}
+
+test("the chrome theme follows the system appearance by default and tracks its changes", async () => {
+  const chrome = await createChromeHarness({ systemTheme: "light" });
+
+  assert.equal(rootTheme(chrome), "light");
+  assert.equal(chrome.element("themeToggleText").textContent, "Theme: System");
+
+  chrome.setSystemTheme("dark");
+  assert.equal(rootTheme(chrome), "dark");
+  assert.deepEqual({ ...chrome.postedToFrame.at(-1) }, { type: "lavish:setTheme", theme: "dark" });
+});
+
+test("the chrome stays dark when the system declares no light preference", async () => {
+  const chrome = await createChromeHarness();
+
+  assert.equal(rootTheme(chrome), "dark");
+});
+
+test("the theme menu item cycles System, Light, Dark and remembers the choice", async () => {
+  const localStore = new Map();
+  const chrome = await createChromeHarness({ systemTheme: "dark", localStore });
+
+  chrome.element("themeToggle").click();
+  assert.equal(rootTheme(chrome), "light");
+  assert.equal(chrome.element("themeToggleText").textContent, "Theme: Light");
+  assert.equal(localStore.get("lavish-axi:theme"), "light");
+  assert.deepEqual({ ...chrome.postedToFrame.at(-1) }, { type: "lavish:setTheme", theme: "light" });
+
+  // A fixed choice ignores later system changes.
+  chrome.setSystemTheme("light");
+  chrome.setSystemTheme("dark");
+  assert.equal(rootTheme(chrome), "light");
+
+  chrome.element("themeToggle").click();
+  assert.equal(rootTheme(chrome), "dark");
+  assert.equal(chrome.element("themeToggleText").textContent, "Theme: Dark");
+  assert.equal(localStore.get("lavish-axi:theme"), "dark");
+
+  chrome.element("themeToggle").click();
+  assert.equal(chrome.element("themeToggleText").textContent, "Theme: System");
+  assert.equal(localStore.has("lavish-axi:theme"), false);
+});
+
+test("a remembered theme survives a reload over the system appearance", async () => {
+  const localStore = new Map([["lavish-axi:theme", "light"]]);
+  const chrome = await createChromeHarness({ systemTheme: "dark", localStore });
+
+  assert.equal(rootTheme(chrome), "light");
+  assert.equal(chrome.element("themeToggleText").textContent, "Theme: Light");
+});
+
+test("the artifact learns the current theme on every load", async () => {
+  const chrome = await createChromeHarness({ systemTheme: "light" });
+
+  chrome.frame.dispatch("load");
+  assert.ok(chrome.postedToFrame.some((message) => message.type === "lavish:setTheme" && message.theme === "light"));
+});
+
+test("the theme toggle still works when the browser refuses localStorage", async () => {
+  const chrome = await createChromeHarness({ systemTheme: "dark", localStorageThrows: true });
+
+  chrome.element("themeToggle").click();
+  assert.equal(rootTheme(chrome), "light");
 });

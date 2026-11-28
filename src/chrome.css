@@ -9,6 +9,7 @@
 }
 
 :root {
+  --scheme: dark;
   /* 中性灰阶：纯灰无色偏，深色外壳 90% 的面积只用这一组。 */
   --gray-950: #111112;
   --gray-900: #161617;
@@ -46,6 +47,10 @@
   --accent-line: rgba(0, 113, 227, 0.5);
   --danger: var(--red-400);
   --danger-soft: rgba(255, 105, 97, 0.12);
+  /* 遮罩：scrim 压暗背后内容（抽屉、发布弹窗），veil 几乎盖住背后内容（会话结束、白板）。 */
+  --scrim: rgba(17, 17, 18, 0.72);
+  --veil: rgba(17, 17, 18, 0.86);
+  --veil-strong: rgba(17, 17, 18, 0.92);
   --font-sans:
     Geist, -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei",
     ui-sans-serif, system-ui, sans-serif;
@@ -110,6 +115,37 @@
   --annotate-outline: 2px solid var(--accent);
   --annotate-offset: 2px;
 }
+/* 通过语义变量切换主题，不用旧版 Android 内嵌浏览器可能不支持的 light-dark()。
+   核对文字对比度时按控件实际合成的背景计算，包括半透明的警告标签和悬停底色。 */
+:root[data-theme="light"] {
+  --scheme: light;
+  --bg: #ffffff;
+  --bg-panel: #ffffff;
+  --bg-bar: #ffffff;
+  --bg-elevated: #f5f5f7;
+  --bg-hover: #ebebef;
+  --fg: #181818;
+  --fg-muted: #3a3a3c;
+  --fg-dim: #606060;
+  --fg-faint: #6a6a6a;
+  --fg-label: #6a6a6a;
+  --border: #e5e5e7;
+  --border-subtle: #f0f0f2;
+  --border-strong: #d2d2d7;
+  --accent: #0071e3;
+  --accent-hover: #005bb5;
+  /* 强调色在模块底色上达不到 4.5:1；文字用更深的值，为叠加底色留出余量。 */
+  --accent-text: #005bb5;
+  --accent-soft: rgba(0, 113, 227, 0.08);
+  --accent-line: rgba(0, 113, 227, 0.4);
+  --danger: #bc0012;
+  --danger-soft: rgba(215, 0, 21, 0.08);
+  --scrim: rgba(24, 24, 24, 0.32);
+  --veil: rgba(255, 255, 255, 0.86);
+  --veil-strong: rgba(255, 255, 255, 0.92);
+  --shadow-tooltip: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --shadow-floating: 0 12px 40px rgba(0, 0, 0, 0.12);
+}
 * {
   box-sizing: border-box;
 }
@@ -130,7 +166,7 @@ body {
   text-rendering: optimizeLegibility;
 }
 body.lavish {
-  color-scheme: dark;
+  color-scheme: var(--scheme);
 }
 :focus-visible {
   outline: var(--annotate-outline);
@@ -564,6 +600,9 @@ body.lavish {
   display: none;
 }
 .more-menu {
+  max-height: calc(var(--layout-vh, 100vh) - var(--bar-h));
+  max-height: calc(var(--layout-vh, 100dvh) - var(--bar-h));
+  overflow-y: auto;
   right: 0;
   top: 40px;
   width: min(300px, calc(100vw - 24px));
@@ -890,7 +929,7 @@ body.lavish {
   display: grid;
   place-items: center;
   padding: var(--space-16);
-  background: rgba(17, 17, 18, 0.72);
+  background: var(--scrim);
 }
 .share-overlay[hidden] {
   display: none;
@@ -1789,7 +1828,7 @@ body.lavish {
 .ended-overlay {
   position: fixed;
   inset: var(--bar-h) 0 0 0;
-  background: rgba(17, 17, 18, 0.86);
+  background: var(--veil);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2059,7 +2098,7 @@ body.layout-gate-active iframe#artifact {
     position: fixed;
     inset: var(--bar-h) 0 0 0;
     z-index: 29;
-    background: rgba(17, 17, 18, 0.72);
+    background: var(--scrim);
     opacity: 0;
     pointer-events: none;
     transition: opacity var(--dur-slow) var(--ease);
@@ -2107,7 +2146,7 @@ body.layout-gate-active iframe#artifact {
     box-shadow: 0 0 0 0 var(--accent-line);
   }
   100% {
-    box-shadow: 0 0 0 10px rgba(0, 113, 227, 0);
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--accent) 0%, transparent);
   }
 }
 
@@ -2118,7 +2157,7 @@ body.layout-gate-active iframe#artifact {
 .whiteboard-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(17, 17, 18, 0.92);
+  background: var(--veil-strong);
   z-index: 80;
   display: flex;
 }

@@ -171,7 +171,8 @@ function parseChromeElements(html) {
 // would in a browser.
 function bootChromeFailsafe(options = {}, session = {}) {
   const html = createChromeHtml({ key: "abc", file: "/tmp/artifact.html", ...session }, options);
-  const inline = html.match(/<script>([\s\S]*?)<\/script>\s*<script src="\/chrome-client\.js"/);
+  // The failsafe is the inline script immediately before the client tag, not the head's theme boot.
+  const inline = html.match(/<script>((?:(?!<script>)[\s\S])*?)<\/script>\s*<script src="\/chrome-client\.js"/);
   assert.ok(inline, "the chrome page must inline a boot failsafe before its client script");
 
   const elements = parseChromeElements(html);
@@ -6471,7 +6472,8 @@ test("ended session shows an overlay card over the dimmed chrome", async () => {
   assert.match(html, /class="ended-copy">\/tmp\/artifact\.html</);
   assert.doesNotMatch(html, /The agent polling loop can stop\./);
   assert.match(css, /\.ended-overlay\{[^}]*inset:var\(--bar-h\) 0 0 0/);
-  assert.match(css, /\.ended-overlay\{[^}]*background:rgba\(17,17,18,.86\)/);
+  assert.match(css, /\.ended-overlay\{[^}]*background:var\(--veil\)/);
+  assert.match(css, /:root\{[^}]*--veil:rgba\(17,17,18,.86\)/);
   assert.match(css, /\.ended-title\{[^}]*font-weight:var\(--w-semi\)/);
   assert.match(js, /endedOverlay\.hidden = false/);
   assert.match(js, /annotationSwitch\.disabled = true/);

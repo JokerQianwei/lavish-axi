@@ -1470,6 +1470,63 @@ function cycleLayoutPreference() {
 
 applyLayoutLock();
 
+// ---- Theme ----
+const THEME_STORAGE_KEY = "lavish-axi:theme";
+const SYSTEM_LIGHT_QUERY = "(prefers-color-scheme: light)";
+const themeToggle = /** @type {HTMLButtonElement | null} */ (document.getElementById("themeToggle"));
+const themeToggleText = /** @type {HTMLSpanElement | null} */ (document.getElementById("themeToggleText"));
+let themePreference = readThemePreference();
+
+function readThemePreference() {
+  try {
+    const value = localStorage.getItem(THEME_STORAGE_KEY);
+    return value === "light" || value === "dark" ? value : "system";
+  } catch {
+    return "system";
+  }
+}
+
+// 与 CHROME_THEME_BOOT_JS 保持一致，避免客户端接管时改变首帧主题。
+function resolvedTheme() {
+  if (themePreference !== "system") return themePreference;
+  return mediaMatches(SYSTEM_LIGHT_QUERY) ? "light" : "dark";
+}
+
+function applyTheme() {
+  document.documentElement.setAttribute("data-theme", resolvedTheme());
+  if (themeToggleText) {
+    const label = themePreference === "light" ? "Light" : themePreference === "dark" ? "Dark" : "System";
+    themeToggleText.textContent = "Theme: " + label;
+  }
+}
+
+// 切换时通知当前批注卡；新加载的 iframe 由 load 处理器单独同步。
+function themeChanged() {
+  applyTheme();
+  postToFrame({ type: "lavish:setTheme", theme: resolvedTheme() });
+}
+
+function cycleThemePreference() {
+  const order = ["system", "light", "dark"];
+  themePreference = order[(order.indexOf(themePreference) + 1) % order.length];
+  try {
+    if (themePreference === "system") localStorage.removeItem(THEME_STORAGE_KEY);
+    else localStorage.setItem(THEME_STORAGE_KEY, themePreference);
+  } catch {
+    // Storage refused: the choice still applies to this page.
+  }
+  themeChanged();
+}
+
+if (themeToggle) themeToggle.onclick = () => cycleThemePreference();
+if (typeof window.matchMedia === "function") {
+  // 跟随系统时，系统切换外观立即生效；固定为浅色或深色时不受影响。
+  window.matchMedia(SYSTEM_LIGHT_QUERY)?.addEventListener?.("change", () => {
+    if (themePreference === "system") themeChanged();
+  });
+}
+applyTheme();
+
 // ---- Phone-width conversation sheet ----
 // Below this width chrome.css turns the conversation panel into a dock the user raises as a
 // bottom sheet over the artifact. This controller owns intent, accessibility state, gestures,
@@ -5069,6 +5126,7 @@ document.addEventListener(
 frame.addEventListener("load", () => {
   if (artifactSpokeToken !== artifactLoadToken) armArtifactAvailabilityProbe(artifactLoadToken);
   postToFrame({ type: "lavish:setAnnotationMode", enabled: annotation && !ended });
+  postToFrame({ type: "lavish:setTheme", theme: resolvedTheme() });
   // Replay the pre-reload scroll position so hot reloads don't jump the artifact to the top.
   postToFrame({ type: "lavish:restoreScroll", x: lastScroll.x, y: lastScroll.y });
   if (lastReviewState) postToFrame({ type: "lavish:restoreReviewState", state: lastReviewState });
