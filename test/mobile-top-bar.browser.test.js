@@ -57,9 +57,8 @@ const BAR = `() => {
     pageWidth: document.documentElement.scrollWidth,
     warnings: visible("warningsWrap"),
     revisions: visible("revisionsWrap"),
-    more: { left: Math.round(more.left), right: Math.round(more.right) },
+    moreInside: more.left >= 0 && more.right <= innerWidth && more.top >= 0 && more.bottom <= innerHeight,
     moreHit: !!hit && !!hit.closest("#moreButton"),
-    annotateName: document.getElementById("annotation").textContent.trim(),
   });
 }`;
 
@@ -73,7 +72,8 @@ const OPEN_MENUS = `() => {
   return JSON.stringify({
     revisions,
     expanded: document.getElementById("moreButton").getAttribute("aria-expanded"),
-    end: { left: Math.round(end.left), right: Math.round(end.right), width: Math.round(end.width) },
+    endInside: end.left >= 0 && end.right <= innerWidth && end.top >= 0 && end.bottom <= innerHeight,
+    endHit: !!document.elementFromPoint(end.left + end.width / 2, end.top + end.height / 2)?.closest("#end"),
   });
 }`;
 
@@ -133,19 +133,19 @@ test(
     function assertMoreReachable(bar, width, label) {
       const where = `${label} @${width}px: ${JSON.stringify(bar)}`;
       assert.ok(bar.pageWidth <= width, `top bar does not widen the page: ${where}`);
-      assert.ok(bar.more.left >= 0 && bar.more.right <= width, `More is inside the viewport: ${where}`);
+      assert.equal(bar.moreInside, true, `More is inside the viewport: ${where}`);
       assert.equal(bar.moreHit, true, `More receives the tap: ${where}`);
-      assert.equal(bar.annotateName, "Annotate", `the mode switch keeps its accessible name: ${where}`);
+      const snapshot = run("chrome-devtools-axi", ["snapshot"], chromeEnv);
+      assert.match(snapshot, /\bbutton "Annotate"/, where);
+      assert.match(snapshot, /\bbutton "3 revisions"/, where);
       const menu = evaluate(OPEN_MENUS);
       assert.ok(
         menu.revisions.width > 0 && menu.revisions.left >= 0 && menu.revisions.right <= width,
         `the revisions drawer opens inside the viewport: ${where} ${JSON.stringify(menu.revisions)}`,
       );
       assert.equal(menu.expanded, "true", `More opens its menu: ${where}`);
-      assert.ok(
-        menu.end.width > 0 && menu.end.left >= 0 && menu.end.right <= width,
-        `End session is reachable: ${where}`,
-      );
+      assert.equal(menu.endInside, true, `End session is inside the viewport: ${where}`);
+      assert.equal(menu.endHit, true, `End session receives the tap: ${where}`);
     }
 
     try {
