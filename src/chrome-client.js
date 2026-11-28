@@ -570,8 +570,7 @@ function promptAnchor(prompt) {
   });
 }
 
-// 消息引用的聊天记录摘录，与 src/chat-messages.js 的 promptQuotes 同一规则（本文件不能 import）；
-// test/chrome-client-queue.test.js 固定两处一致，排队中与送达后显示相同。完整原文只在 target 里发给 agent。
+// 本文件不能 import；摘录规则见 src/chat-messages.js 的 promptQuotes。
 function promptQuotes(prompt) {
   const target = prompt?.target && typeof prompt.target === "object" ? prompt.target : null;
   if (target?.type !== CHAT_QUOTE_TARGET_TYPE || !Array.isArray(target.quotes)) return [];
@@ -583,7 +582,6 @@ function promptQuotes(prompt) {
     .filter((quote) => quote.excerpt);
 }
 
-// 每段引用一行，沿用锚点行的样式：chip 写 quote，悬停显示出自谁。
 function quotesHtml(quotes) {
   if (!Array.isArray(quotes)) return "";
   return quotes
@@ -2439,10 +2437,6 @@ function createChatAttachmentsController() {
 const chatAttachmentController = createChatAttachmentsController();
 
 // ---- Chat quotes ----
-// 在聊天栏选中一条已发送消息里的文字，就近浮出 Quote 按钮；点击后选中的原文成为输入框上方的一张
-// 引用卡片，可以叠加多段、逐张移除，和输入的文字一起作为一条 composer 消息发出（见 sendQueued）。
-// 卡片只截断显示，发出的是完整原文。选区必须落在同一条消息内，这样每段引用都有确定的说话方。
-// 手机上系统选择菜单在选区上方，按钮放到选区下方避开它；桌面放在选区上方。
 const QUOTE_BUTTON_GAP_PX = 8;
 /** @type {{ from: "agent" | "user", text: string }[]} */
 let composerQuotes = [];
@@ -2482,7 +2476,8 @@ function renderComposerQuotes() {
   }
 }
 
-// 当前选区若完整落在一条对话记录消息内，返回 { quote, rect }；否则 null。rect 是选区在视口中的外框。
+// 只接受同一条消息内的单个选区，避免把不同作者的文字合成一条引用；不满足条件时返回 null。
+// 返回的 rect 是选区在视口中的外框。
 function chatSelectionQuote() {
   if (typeof document.getSelection !== "function") return null;
   const selection = document.getSelection();
@@ -2538,6 +2533,7 @@ function updateQuoteButton() {
   const maxY = minY + viewportHeight / layoutZoom - 2 * QUOTE_BUTTON_GAP_PX - height;
   const aboveTop = topEdge / layoutZoom - height - QUOTE_BUTTON_GAP_PX;
   const belowTop = bottom / layoutZoom + QUOTE_BUTTON_GAP_PX;
+  // 触屏优先放下方，给通常出现在选区上方的系统菜单留空间。
   const below = mediaMatches("(pointer: coarse)");
   let top = below ? belowTop : aboveTop;
   // 放不下时换到另一侧，再夹回视口内。

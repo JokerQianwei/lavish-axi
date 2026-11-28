@@ -499,14 +499,11 @@ function bound(value, max) {
   return text.slice(0, max - 1) + "…";
 }
 
-// 引用聊天记录：用户在聊天栏选中一段已发送消息、点 Quote 后，作为 composer 消息的 target 发出。
-// target.quotes 保留选中的完整原文和说话方（agent 或 user），原样交给 agent；对话记录只存截断后的
-// 摘录（entry.quotes）用于显示，所以界面截断不影响 agent 收到的内容。
 export const CHAT_QUOTE_TARGET_TYPE = "chat-quote";
 
 /**
- * 把客户端提交的引用 target 收窄成固定形状；没有任何有效引用时返回 null（消息照常发送，不带 target）。
- * 只保留 from 为 agent/user、text 非空白的条目，text 不截断。
+ * 校验客户端提交的引用；没有有效引用时返回 null，消息不带 target。
+ * 只用 trim 判空，不修改选中的原文；截断只用于对话记录的摘录。
  */
 export function normalizeChatQuoteTarget(target) {
   const quotes = (Array.isArray(target?.quotes) ? target.quotes : [])
@@ -586,8 +583,8 @@ function promptAnchor(prompt, kind) {
 // What an accepted prompt becomes in `session.chat`. Every kind of prompt enters the transcript,
 // so the conversation shows what the reviewer said and not only what the agent answered. Only the
 // client-visible attachment fields are kept: the resolved path, mime, and size stay in the prompt.
-// An accepted prompt keeps its identity even when its only displayable content is an anchor, so
-// the transcript remains the authoritative acknowledgement source after a lost response.
+// An accepted prompt keeps its identity even without message text, so the transcript remains
+// the authoritative acknowledgement source after a lost response.
 export function chatEntryForPrompt(prompt, at) {
   if (!prompt || typeof prompt !== "object") return null;
   const text = String(prompt.prompt || "");

@@ -2910,7 +2910,6 @@ const chromeIcons = {
   revisions: chromeIcon('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>'),
   // 主题切换：半明半暗的圆。
   theme: chromeIcon('<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor"/>', 15),
-  // 聊天记录选中后浮出的 Quote 按钮与引用卡片：对话气泡里一条引号。
   quote: chromeIcon(
     '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="13" y2="13"/>',
     14,
