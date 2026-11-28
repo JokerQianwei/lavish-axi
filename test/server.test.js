@@ -3594,6 +3594,37 @@ test("/chrome.css serves the extracted chrome stylesheet", async () => {
   }
 });
 
+// 固定路由只返回已发布的 WOFF2（标准签名 wOF2）；未版本化的 URL 缓存一天并支持条件请求。
+test("the fixed Geist WOFF2 route serves the font and supports revalidation", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "lavish-serve-"));
+  const server = await serve({ port: 0, stateFile: path.join(dir, "state.json"), version: "9.9.9-test" });
+  try {
+    const base = `http://127.0.0.1:${server.port}`;
+    const fontPath = "/fonts/Geist-Variable.woff2";
+    const res = await fetch(`${base}${fontPath}`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("content-type"), "font/woff2");
+    assert.equal(res.headers.get("cache-control"), "public, max-age=86400");
+    const bytes = Buffer.from(await res.arrayBuffer());
+    assert.equal(bytes.subarray(0, 4).toString("latin1"), "wOF2");
+
+    for (const [validator, condition] of [
+      ["etag", "if-none-match"],
+      ["last-modified", "if-modified-since"],
+    ]) {
+      const value = res.headers.get(validator);
+      assert.ok(value, `missing ${validator}`);
+      // Fetch 会为条件请求自动添加缓存控制头；用原始 HTTP 只发送待验证的条件。
+      assert.equal((await rawRequest(server.port, fontPath, { headers: { [condition]: value } })).status, 304);
+    }
+
+    assert.equal((await fetch(`${base}/fonts/Geist-OFL.txt`)).status, 404);
+  } finally {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("/design serves local Tailwind and DaisyUI artifact assets", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "lavish-serve-"));
   const server = await serve({ port: 0, stateFile: path.join(dir, "state.json"), version: "9.9.9-test" });

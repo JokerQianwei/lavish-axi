@@ -50,6 +50,14 @@ SOFTWARE.
 
 The Xiaolai family (CJK glyphs) is intentionally not vendored; Excalidraw falls back to its CDN or the system font for those glyphs.
 
+## Font vendored into `dist/fonts/`
+
+| Asset                                                  | License                   | Copyright                                                        |
+| ------------------------------------------------------ | ------------------------- | ---------------------------------------------------------------- |
+| `Geist-Variable.woff2` (Geist Sans, npm `geist@1.9.2`) | SIL Open Font License 1.1 | Copyright (c) 2023 Vercel, in collaboration with basement.studio |
+
+The full license text ships beside the font as `dist/fonts/Geist-OFL.txt` (source: `src/fonts/Geist-OFL.txt`).
+
 ## Bundled into `dist/design/` (pre-existing)
 
 | Asset                                             | License |

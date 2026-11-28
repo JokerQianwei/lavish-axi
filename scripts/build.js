@@ -47,6 +47,10 @@ await chmod("dist/server.mjs", 0o755);
 
 await copyFile("src/chrome-client.js", "dist/chrome-client.js");
 await copyFile("src/chrome.css", "dist/chrome.css");
+// 外壳字体与其 OFL 许可证一起分发（OFL 要求许可证随字体文件附带）。
+await mkdir("dist/fonts", { recursive: true });
+await copyFile("src/fonts/Geist-Variable.woff2", "dist/fonts/Geist-Variable.woff2");
+await copyFile("src/fonts/Geist-OFL.txt", "dist/fonts/Geist-OFL.txt");
 await mkdir("dist/design", { recursive: true });
 await copyFile("node_modules/daisyui/daisyui.css", "dist/design/daisyui.css");
 await copyFile("node_modules/daisyui/themes.css", "dist/design/daisyui-themes.css");

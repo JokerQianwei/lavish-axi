@@ -89,6 +89,10 @@ import {
 
 const chromeClientUrl = new URL("./chrome-client.js", import.meta.url);
 const chromeCssUrl = new URL("./chrome.css", import.meta.url);
+// 外壳字体：源码运行时是 src/fonts，打包后 build.js 复制到 dist/fonts，两处相对位置一致。
+const chromeFontFile = fileURLToPath(new URL("./fonts/Geist-Variable.woff2", import.meta.url));
+// URL 不带版本号，所以不用 immutable：缓存一天，过期后靠 ETag/Last-Modified 回 304，升级字体最多晚一天生效。
+const CHROME_FONT_MAX_AGE_MS = 24 * 60 * 60_000;
 const designAssetUrls = {
   "daisyui.css": {
     packaged: new URL("./design/daisyui.css", import.meta.url),
@@ -1636,6 +1640,13 @@ export async function serve({
     } catch (error) {
       next(error);
     }
+  });
+
+  // 只服务外壳 chrome.css 声明的这一个字体文件，不按路径参数解析，避免成为任意文件读取入口。
+  app.get("/fonts/Geist-Variable.woff2", (_req, res, next) => {
+    res.sendFile(chromeFontFile, { maxAge: CHROME_FONT_MAX_AGE_MS, dotfiles: "allow" }, (error) => {
+      if (error) next(error);
+    });
   });
 
   app.get("/design/:asset", async (req, res, next) => {
