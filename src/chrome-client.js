@@ -1470,6 +1470,68 @@ function cycleLayoutPreference() {
 
 applyLayoutLock();
 
+// ---- Theme ----
+// 外壳的浅色/深色主题。偏好是 "system"（默认，跟随 prefers-color-scheme）、"light" 或 "dark"，
+// 存在本设备 localStorage；<html data-theme> 只取解析后的 "light"/"dark"，chrome.css 按它换语义变量。
+// 首帧的 data-theme 由 server.js 的 CHROME_THEME_BOOT_JS 按同一规则设定。批注卡在作品 iframe 里，
+// 通过 lavish:setTheme 跟随；方案正文不受影响。
+const THEME_STORAGE_KEY = "lavish-axi:theme";
+const SYSTEM_LIGHT_QUERY = "(prefers-color-scheme: light)";
+const themeToggle = /** @type {HTMLButtonElement | null} */ (document.getElementById("themeToggle"));
+const themeToggleText = /** @type {HTMLSpanElement | null} */ (document.getElementById("themeToggleText"));
+let themePreference = readThemePreference();
+
+function readThemePreference() {
+  try {
+    const value = localStorage.getItem(THEME_STORAGE_KEY);
+    return value === "light" || value === "dark" ? value : "system";
+  } catch {
+    return "system";
+  }
+}
+
+// 系统没有声明浅色（含 no-preference）时保持深色，这是浅色主题出现前的外观。
+function resolvedTheme() {
+  if (themePreference !== "system") return themePreference;
+  return mediaMatches(SYSTEM_LIGHT_QUERY) ? "light" : "dark";
+}
+
+// 只更新外壳自身；作品 iframe 在加载时由 frame load 处理器取当前主题，切换时由 themeChanged() 通知。
+function applyTheme() {
+  document.documentElement.setAttribute("data-theme", resolvedTheme());
+  if (themeToggleText) {
+    const label = themePreference === "light" ? "Light" : themePreference === "dark" ? "Dark" : "System";
+    themeToggleText.textContent = "Theme: " + label;
+  }
+}
+
+function themeChanged() {
+  applyTheme();
+  postToFrame({ type: "lavish:setTheme", theme: resolvedTheme() });
+}
+
+// System, then Light, then Dark, like the layout toggle. "system" clears the stored choice.
+function cycleThemePreference() {
+  const order = ["system", "light", "dark"];
+  themePreference = order[(order.indexOf(themePreference) + 1) % order.length];
+  try {
+    if (themePreference === "system") localStorage.removeItem(THEME_STORAGE_KEY);
+    else localStorage.setItem(THEME_STORAGE_KEY, themePreference);
+  } catch {
+    // Storage refused: the choice still applies to this page.
+  }
+  themeChanged();
+}
+
+if (themeToggle) themeToggle.onclick = () => cycleThemePreference();
+if (typeof window.matchMedia === "function") {
+  // 跟随系统时，系统切换外观立即生效；固定为浅色或深色时不受影响。
+  window.matchMedia(SYSTEM_LIGHT_QUERY)?.addEventListener?.("change", () => {
+    if (themePreference === "system") themeChanged();
+  });
+}
+applyTheme();
+
 // ---- Phone-width conversation sheet ----
 // Below this width chrome.css turns the conversation panel into a dock the user raises as a
 // bottom sheet over the artifact. This controller owns intent, accessibility state, gestures,
@@ -5069,6 +5131,7 @@ document.addEventListener(
 frame.addEventListener("load", () => {
   if (artifactSpokeToken !== artifactLoadToken) armArtifactAvailabilityProbe(artifactLoadToken);
   postToFrame({ type: "lavish:setAnnotationMode", enabled: annotation && !ended });
+  postToFrame({ type: "lavish:setTheme", theme: resolvedTheme() });
   // Replay the pre-reload scroll position so hot reloads don't jump the artifact to the top.
   postToFrame({ type: "lavish:restoreScroll", x: lastScroll.x, y: lastScroll.y });
   if (lastReviewState) postToFrame({ type: "lavish:restoreReviewState", state: lastReviewState });

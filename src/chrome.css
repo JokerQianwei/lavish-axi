@@ -9,6 +9,9 @@
 }
 
 :root {
+  /* 默认深色主题。浅色值在下方 :root[data-theme="light"] 覆盖同名语义变量；data-theme 由页面头部的
+     启动脚本按 localStorage 选择或系统 prefers-color-scheme 设定，chrome-client.js 负责切换。 */
+  --scheme: dark;
   /* 中性灰阶：纯灰无色偏，深色外壳 90% 的面积只用这一组。 */
   --gray-950: #111112;
   --gray-900: #161617;
@@ -46,6 +49,10 @@
   --accent-line: rgba(0, 113, 227, 0.5);
   --danger: var(--red-400);
   --danger-soft: rgba(255, 105, 97, 0.12);
+  /* 遮罩：scrim 压暗背后内容（抽屉、发布弹窗），veil 几乎盖住背后内容（会话结束、白板）。 */
+  --scrim: rgba(17, 17, 18, 0.72);
+  --veil: rgba(17, 17, 18, 0.86);
+  --veil-strong: rgba(17, 17, 18, 0.92);
   --font-sans:
     Geist, -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Microsoft YaHei",
     ui-sans-serif, system-ui, sans-serif;
@@ -110,6 +117,37 @@
   --annotate-outline: 2px solid var(--accent);
   --annotate-offset: 2px;
 }
+/* 浅色主题（qw-design）：白底、#F5F5F7 模块底色、#181818 主文字、#6A6A6A 次要文字、#0071E3 唯一强调色。
+   只覆盖语义变量，组件样式不分主题。文字色在白底和 #F5F5F7 上都不低于 4.5:1。 */
+:root[data-theme="light"] {
+  --scheme: light;
+  --bg: #ffffff;
+  --bg-panel: #ffffff;
+  --bg-bar: #ffffff;
+  --bg-elevated: #f5f5f7;
+  --bg-hover: #ebebef;
+  --fg: #181818;
+  --fg-muted: #3a3a3c;
+  --fg-dim: #6a6a6a;
+  --fg-faint: #6a6a6a;
+  --fg-label: #6a6a6a;
+  --border: #e5e5e7;
+  --border-subtle: #f0f0f2;
+  --border-strong: #d2d2d7;
+  --accent: #0071e3;
+  --accent-hover: #005bb5;
+  /* #0071E3 在 #F5F5F7 上只有 4.2:1，作文字时用同色相加深一档。 */
+  --accent-text: #0066cc;
+  --accent-soft: rgba(0, 113, 227, 0.08);
+  --accent-line: rgba(0, 113, 227, 0.4);
+  --danger: #d70015;
+  --danger-soft: rgba(215, 0, 21, 0.08);
+  --scrim: rgba(24, 24, 24, 0.32);
+  --veil: rgba(255, 255, 255, 0.86);
+  --veil-strong: rgba(255, 255, 255, 0.92);
+  --shadow-tooltip: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --shadow-floating: 0 12px 40px rgba(0, 0, 0, 0.12);
+}
 * {
   box-sizing: border-box;
 }
@@ -130,7 +168,7 @@ body {
   text-rendering: optimizeLegibility;
 }
 body.lavish {
-  color-scheme: dark;
+  color-scheme: var(--scheme);
 }
 :focus-visible {
   outline: var(--annotate-outline);
@@ -890,7 +928,7 @@ body.lavish {
   display: grid;
   place-items: center;
   padding: var(--space-16);
-  background: rgba(17, 17, 18, 0.72);
+  background: var(--scrim);
 }
 .share-overlay[hidden] {
   display: none;
@@ -1789,7 +1827,7 @@ body.lavish {
 .ended-overlay {
   position: fixed;
   inset: var(--bar-h) 0 0 0;
-  background: rgba(17, 17, 18, 0.86);
+  background: var(--veil);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2059,7 +2097,7 @@ body.layout-gate-active iframe#artifact {
     position: fixed;
     inset: var(--bar-h) 0 0 0;
     z-index: 29;
-    background: rgba(17, 17, 18, 0.72);
+    background: var(--scrim);
     opacity: 0;
     pointer-events: none;
     transition: opacity var(--dur-slow) var(--ease);
@@ -2118,7 +2156,7 @@ body.layout-gate-active iframe#artifact {
 .whiteboard-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(17, 17, 18, 0.92);
+  background: var(--veil-strong);
   z-index: 80;
   display: flex;
 }

@@ -92,6 +92,7 @@ function createElement(tag) {
       shadowRoot.querySelectorAll = (selector) =>
         shadowRoot.children.filter((child) => `.${child.className}` === selector);
       shadowRoot.querySelector = (selector) => shadowRoot.querySelectorAll(selector)[0] ?? null;
+      shadowRoot.host = element;
       element.shadowRoot = shadowRoot;
       return shadowRoot;
     },
@@ -461,6 +462,22 @@ test("the chrome can turn annotation on and off after a page declares off", () =
   sdk.runTimers();
   const state = sdk.posted.filter((message) => message.type === "lavish:reviewState").at(-1);
   assert.equal(state.state.card, null, "turning annotation off closes the active card");
+});
+
+// 批注卡的主题契约：卡片挂在 shadow 宿主上，宿主的 data-theme 跟随外壳发来的 lavish:setTheme，
+// 卡片打开前后收到都生效；不认识的值不改变当前主题。
+test("the annotation card follows the chrome theme before and after it opens", () => {
+  const sdk = bootSdk();
+  sdk.sendChromeMessage({ type: "lavish:setTheme", theme: "light" });
+  sdk.click(appendTo(sdk.body, cell("p", "Review me")));
+  const host = sdk.document.documentElement.children.find((child) => child.shadowRoot);
+  assert.ok(host, "the card mounts under a shadow host");
+  assert.equal(host.getAttribute("data-theme"), "light");
+
+  sdk.sendChromeMessage({ type: "lavish:setTheme", theme: "dark" });
+  assert.equal(host.getAttribute("data-theme"), "dark");
+  sdk.sendChromeMessage({ type: "lavish:setTheme", theme: "sepia" });
+  assert.equal(host.getAttribute("data-theme"), "dark");
 });
 
 // Reveal scrolls smoothly, so the target's rect only reaches its final place once the scroll
