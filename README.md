@@ -163,6 +163,7 @@ pnpm link
   Author-defined links and popups can open in top-level tabs, while artifact documents remain sandboxed without same-origin access.
   Lavish does not inject any design system, so the saved HTML file renders identically whether you open it through `lavish-axi` or directly in a browser.
   Run `lavish-axi design` for the single source of agent-facing design guidance, including optional CDN snippets and the whiteboard (Mermaid) opt-in snippet.
+- **Review interface font** - Lavish serves the bundled Geist Sans font for the review interface, so reviewers don't have to install it. The interface uses a fallback while the font loads. The artifact and whiteboard keep their own fonts.
 - **Self-paint warning** - `lavish-axi <html-file>`, `export`, and `share` run a render-free check for artifacts missing an explicit page background and return a one-line `self_paint_warning`.
   The check fails open - any stylesheet link, `@import`, Tailwind runtime script, `color-scheme`, or `html`/`body`/`:root` background signal suppresses it - and it never blocks the open.
 - **Open-time layout gate** - The browser chrome masks an artifact only while the real in-iframe audit waits for fonts and final geometry.
