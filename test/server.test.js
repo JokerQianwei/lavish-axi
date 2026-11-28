@@ -3594,6 +3594,33 @@ test("/chrome.css serves the extracted chrome stylesheet", async () => {
   }
 });
 
+// Oracle: the WOFF2 spec (W3C) fixes the file signature at 0x774F4632 ("wOF2"); the font must be
+// reachable through the @font-face URL the served stylesheet actually declares, not a guessed path.
+test("/chrome.css @font-face loads the bundled Geist WOFF2 with swap and a cache lifetime", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "lavish-serve-"));
+  const server = await serve({ port: 0, stateFile: path.join(dir, "state.json"), version: "9.9.9-test" });
+  try {
+    const base = `http://127.0.0.1:${server.port}`;
+    const css = normalizeCssForAssertions(await (await fetch(`${base}/chrome.css`)).text());
+    const faces = css.match(/@font-face\{[^}]*\}/g) || [];
+    const geist = faces.find((face) => /font-family:"?Geist"?;/.test(face));
+    assert.ok(geist, "chrome.css declares a Geist @font-face");
+    assert.match(geist, /font-display:swap/);
+    const url = /url\("?([^")]+)"?\)/.exec(geist)?.[1];
+    assert.ok(url?.startsWith("/"), "Geist is served by Lavish itself, not a CDN");
+
+    const res = await fetch(new URL(url, base));
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("content-type"), "font/woff2");
+    assert.match(res.headers.get("cache-control") || "", /max-age=[1-9]\d*/);
+    const bytes = Buffer.from(await res.arrayBuffer());
+    assert.equal(bytes.subarray(0, 4).toString("latin1"), "wOF2");
+  } finally {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("/design serves local Tailwind and DaisyUI artifact assets", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "lavish-serve-"));
   const server = await serve({ port: 0, stateFile: path.join(dir, "state.json"), version: "9.9.9-test" });

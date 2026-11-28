@@ -1,3 +1,13 @@
+/* 外壳随包附带 Geist 可变字体（OFL 1.1，见 src/fonts/Geist-OFL.txt），没装 Geist 的设备也显示同一字形。
+   只在外壳文档声明，iframe 里的方案正文不受影响；swap 让首屏先用回落字体，字体到了再换。 */
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   /* 中性灰阶：纯灰无色偏，深色外壳 90% 的面积只用这一组。 */
   --gray-950: #111112;
