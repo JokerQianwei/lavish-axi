@@ -28,6 +28,24 @@ function run(command, args, env, timeout = 45_000) {
   return `${result.stdout || ""}${result.stderr || ""}`;
 }
 
+/** Evaluate an expression in the chrome page and return its JSON-decoded result. */
+function evaluate(chromeEnv, expression) {
+  const output = run("chrome-devtools-axi", ["eval", expression], chromeEnv);
+  const raw = output.match(/result:\s*("(?:[^"\\]|\\.)*")/s)?.[1];
+  assert.ok(raw, output);
+  // chrome-devtools-axi renders the evaluated value as a JSON string, and the expressions
+  // here already JSON.stringify their result - so unwrap until it stops being encoded JSON.
+  let value = JSON.parse(raw);
+  while (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      break;
+    }
+  }
+  return value;
+}
+
 async function freePort() {
   const server = net.createServer();
   await new Promise((resolve, reject) => {
@@ -75,26 +93,9 @@ test(
       );
     }
 
-    /** Evaluate an expression in the chrome page and return its JSON-decoded result. */
-    function evaluate(expression) {
-      const output = run("chrome-devtools-axi", ["eval", expression], chromeEnv);
-      const raw = output.match(/result:\s*("(?:[^"\\]|\\.)*")/s)?.[1];
-      assert.ok(raw, output);
-      // chrome-devtools-axi renders the evaluated value as a JSON string, and the expressions
-      // here already JSON.stringify their result - so unwrap until it stops being encoded JSON.
-      let value = JSON.parse(raw);
-      while (typeof value === "string") {
-        try {
-          value = JSON.parse(value);
-        } catch {
-          break;
-        }
-      }
-      return value;
-    }
-
     function inbox() {
       return evaluate(
+        chromeEnv,
         "JSON.stringify({" +
           ' hidden: document.getElementById("warningsWrap").hidden,' +
           ' badge: document.getElementById("warningsCount").textContent,' +
@@ -162,12 +163,14 @@ test(
       assert.equal(reopened.loads, 1, "reopening the session preserves live artifact reloads");
       assert.equal(
         evaluate(
+          chromeEnv,
           'JSON.stringify(new URL(document.getElementById("artifact").src).searchParams.get("artifact_revision"))',
         ),
         2,
       );
       const sessionKey = new URL(url).pathname.split("/").pop();
       const warningState = evaluate(
+        chromeEnv,
         `fetch("/api/${sessionKey}/layout-warnings").then((response) => response.json()).then((data) => JSON.stringify(data))`,
       );
       assert.ok(warningState.warnings.every((warning) => warning.last_seen_revision === 2));
@@ -187,6 +190,7 @@ test(
       // The drawer is accessible and does not break narrow or wide layouts.
       // ---------------------------------------------------------------------
       const opened = evaluate(
+        chromeEnv,
         '(() => { document.getElementById("warningsButton").click(); return JSON.stringify({' +
           ' expanded: document.getElementById("warningsButton").getAttribute("aria-expanded"),' +
           ' role: document.getElementById("warningsDrawer").getAttribute("role"),' +
@@ -211,6 +215,7 @@ test(
       assert.ok(opened.drawerRight <= opened.innerWidth, "the drawer stays inside the viewport");
 
       const escaped = evaluate(
+        chromeEnv,
         '(() => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); return JSON.stringify({' +
           ' hidden: document.getElementById("warningsDrawer").hidden,' +
           " focus: document.activeElement && document.activeElement.id," +
@@ -223,6 +228,7 @@ test(
       wait(3500);
       instrumentArtifactLoads();
       const narrow = evaluate(
+        chromeEnv,
         '(() => { document.getElementById("warningsButton").click(); const box = document.getElementById("warningsDrawer").getBoundingClientRect(); return JSON.stringify({' +
           " docOverflow: document.documentElement.scrollWidth - window.innerWidth," +
           ' barOverflow: document.querySelector(".bar").scrollWidth - window.innerWidth,' +
@@ -257,6 +263,7 @@ test(
       assert.equal(desktopRows.length, 3);
 
       const selected = evaluate(
+        chromeEnv,
         '(() => { document.getElementById("warningsButton").click();' +
           ' const rows = [...document.querySelectorAll(".warning-row")].filter((row) => [...row.querySelectorAll(".warning-chip")][2].textContent.startsWith("Desktop"));' +
           ' rows[0].querySelector(".warning-select").click(); rows[2].querySelector(".warning-select").click();' +
@@ -332,7 +339,7 @@ test(
       assert.equal(afterFix.loads, 1, "one queued batch costs one artifact refresh");
       assert.equal(afterFix.pills, 0);
       assert.equal(
-        evaluate('document.getElementById("chatInput").value'),
+        evaluate(chromeEnv, 'document.getElementById("chatInput").value'),
         "Also check the footer spacing",
         "unsent composer text survives the batch refresh",
       );
@@ -365,6 +372,7 @@ test(
       // one that can surface it again. The same selector can appear under two viewport classes, so
       // identity here is target + viewport, exactly like the fingerprint.
       const dismissed = evaluate(
+        chromeEnv,
         '(() => { document.getElementById("warningsButton").click();' +
           ' const row = [...document.querySelectorAll(".warning-row")].find((candidate) => [...candidate.querySelectorAll(".warning-chip")][2].textContent.startsWith("Desktop"));' +
           ' const target = row.querySelector(".warning-target").textContent;' +
@@ -460,6 +468,7 @@ test("a live reload preserves the review context Lavish owns", { skip: !runBrows
     const output = run(process.execPath, ["bin/lavish-axi.js", artifact, "--no-open"], lavishEnv);
     const url = output.match(/url:\s*"([^"]+)"/)?.[1];
     assert.ok(url, output);
+    run("chrome-devtools-axi", ["open", "about:blank"], chromeEnv);
     run("chrome-devtools-axi", ["emulate", "--viewport", "1440x1000x1"], chromeEnv);
     run("chrome-devtools-axi", ["open", url], chromeEnv);
     wait(4500);
@@ -488,21 +497,24 @@ test("a live reload preserves the review context Lavish owns", { skip: !runBrows
     // Queueing the restored card proves the unsent text itself survived, not just the card.
     click(/button "Queue"/);
     wait(800);
-    const queuedNote = run(
-      "chrome-devtools-axi",
-      [
-        "eval",
-        '() => { const bubble = document.querySelector(".bubble.queued"); const excerpt = bubble.querySelector(".anchor-excerpt"); const scroll = document.getElementById("panelScroll"); const chat = document.getElementById("chatLog"); return JSON.stringify({ text: bubble.querySelector(".bubble-text").textContent, borderStyle: getComputedStyle(bubble).borderStyle, excerptWhiteSpace: getComputedStyle(excerpt).whiteSpace, excerptHeight: excerpt.getBoundingClientRect().height, excerptLineHeight: parseFloat(getComputedStyle(excerpt).lineHeight), scrollOverflowY: getComputedStyle(scroll).overflowY, emptyCopyDisplay: getComputedStyle(chat, "::before").display }); }',
-      ],
+    const geometry = evaluate(
       chromeEnv,
+      '(() => { const bubble = document.querySelector(".bubble.queued"); const style = getComputedStyle(bubble); const excerpt = bubble.querySelector(".anchor-excerpt"); const scroll = document.getElementById("panelScroll"); const chat = document.getElementById("chatLog"); return JSON.stringify({ text: bubble.querySelector(".bubble-text").textContent, borderStyle: style.borderStyle, background: style.backgroundColor, excerptWhiteSpace: getComputedStyle(excerpt).whiteSpace, excerptHeight: excerpt.getBoundingClientRect().height, excerptLineHeight: parseFloat(getComputedStyle(excerpt).lineHeight), scrollOverflowY: getComputedStyle(scroll).overflowY, emptyCopyDisplay: getComputedStyle(chat, "::before").display }); })()',
     );
-    const geometry = JSON.parse(JSON.parse(queuedNote.match(/result:\s*("(?:[^"\\]|\\.)*")/s)[1]));
     assert.equal(geometry.text, "Shorten this to one sentence");
-    assert.equal(geometry.borderStyle, "dashed");
+    assert.doesNotMatch(geometry.borderStyle, /\bdashed\b/);
     assert.equal(geometry.excerptWhiteSpace, "nowrap");
     assert.equal(geometry.scrollOverflowY, "auto");
     assert.equal(geometry.emptyCopyDisplay, "none");
     assert.ok(geometry.excerptHeight <= geometry.excerptLineHeight + 1, "the anchor excerpt stays on one line");
+
+    click(/button "Send to Agent"/);
+    wait(1200);
+    const sentBackground = evaluate(
+      chromeEnv,
+      'getComputedStyle(document.querySelector("#chatLog .bubble.user")).backgroundColor',
+    );
+    assert.notEqual(geometry.background, sentBackground, "the queued note has a distinct background until sent");
   } finally {
     run(process.execPath, ["bin/lavish-axi.js", "stop", "--port", String(port)], lavishEnv, 15_000);
     run("chrome-devtools-axi", ["stop"], chromeEnv);
