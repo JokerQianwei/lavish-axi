@@ -585,6 +585,7 @@ async function createChromeHarness({
     context.window.screen = device.screen;
     context.window.innerWidth = device.innerWidth;
     context.window.innerHeight = device.innerHeight;
+    Object.assign(context.window, { visualViewport: device.visualViewport });
     context.location.search = device.search || "";
     context.location.pathname = "/session/abc";
     context.location.hash = "#top";
@@ -756,8 +757,7 @@ async function createChromeHarness({
     },
     // Models the reader selecting `text` inside `node` (a chat bubble or something else): installs
     // what document.getSelection() reports and fires selectionchange the way the browser does.
-    selectChatText(node, text, rect = { top: 300, bottom: 320, left: 100, right: 260 }) {
-      let ranges = text ? 1 : 0;
+    selectChatText(node, text, rect = { top: 300, bottom: 320, left: 100, right: 260 }, ranges = text ? 1 : 0) {
       context.document.getSelection = () => ({
         get isCollapsed() {
           return ranges === 0;
@@ -10169,6 +10169,9 @@ test("selecting text inside a sent message offers Quote, and selecting elsewhere
   chrome.selectChatText(agentBubble, "five batches");
   assert.equal(chrome.element("quoteButton").hidden, false);
 
+  chrome.selectChatText(agentBubble, "two passages", undefined, 2);
+  assert.equal(chrome.element("quoteButton").hidden, true);
+
   chrome.selectChatText(chrome.element("chatInput"), "typed words");
   assert.equal(chrome.element("quoteButton").hidden, true, "the composer is not part of the transcript");
 
@@ -10179,7 +10182,7 @@ test("selecting text inside a sent message offers Quote, and selecting elsewhere
 
 test("Quote adds a removable card and sends the full quoted text with who wrote it", async () => {
   const posts = [];
-  const long = "Agent plan: ship in five batches, one hour apart. ".repeat(6).trim();
+  const long = "  Agent plan: ship in five batches, one hour apart.\n".repeat(6);
   const { chrome, agentBubble, userBubble } = await chromeWithTranscript({
     fetchImpl: async (url, init = {}) => {
       posts.push({ url, body: init.body ? JSON.parse(init.body) : null });
@@ -10255,8 +10258,7 @@ test("the chrome's queued quotes agree with the server's transcript quotes", asy
     },
   };
   const expected = chatEntryForPrompt({ uid: "", ...prompt }, "2026-09-15T00:00:00.000Z").quotes;
-  const chrome = await createChromeHarness();
-  chrome.sendFrameMessage({ type: "lavish:queuePrompt", prompt });
+  const chrome = await createChromeHarness({ storedQueue: [prompt] });
   const rendered = [
     ...chrome
       .element("queuedLog")
@@ -10266,4 +10268,50 @@ test("the chrome's queued quotes agree with the server's transcript quotes", asy
   ].map((match) => ({ from: match[1] === "the agent" ? "agent" : "user", excerpt: match[3] }));
   assert.deepEqual(rendered, expected);
   assert.equal(expected[0].excerpt.length, 120, "the transcript shows an excerpt, not the full quote");
+  chrome.element("queuedLog").dispatch("click", { target: queuedLogNode(["bubble", "queued"], 0) });
+  typeIntoQueuedEdit(chrome, "");
+  chrome.element("queuedLog").dispatch("click", { target: queuedLogNode(["queued-edit-save"], 0) });
+  assert.equal(chrome.queued()[0].prompt, "");
+  assert.deepEqual(chrome.queued()[0].target, prompt.target);
+});
+
+test("a frame note cannot claim a chat quote", async () => {
+  const chrome = await createChromeHarness();
+  chrome.sendFrameMessage({
+    type: "lavish:queuePrompt",
+    prompt: { prompt: "Keep this", target: { type: "chat-quote", quotes: [{ from: "agent", text: "invented" }] } },
+  });
+  assert.equal(chrome.queued()[0].prompt, "Keep this");
+  assert.equal(chrome.queued()[0].target, undefined);
+});
+
+test("a zoomed phone flips and clamps Quote inside the visual viewport", async () => {
+  const { chrome, agentBubble } = await chromeWithTranscript({
+    device: {
+      ...DESKTOP_SITE_PHONE,
+      screen: { width: 450, height: 900 },
+      innerWidth: 900,
+      visualViewport: { offsetLeft: 60, offsetTop: 100, width: 600, height: 500 },
+    },
+  });
+  const button = chrome.element("quoteButton");
+  button.offsetWidth = 60;
+  button.offsetHeight = 24;
+  chrome.selectChatText(agentBubble, "five", { left: 620, right: 650, top: 540, bottom: 580 });
+  assert.equal(button.style.top, "238px");
+  assert.equal(button.style.left, "262px");
+});
+
+test("a quote-only draft holds back a restart reload", async () => {
+  const { chrome, agentBubble } = await chromeWithTranscript({ fakeClock: true });
+  chrome.selectChatText(agentBubble, "five");
+  chrome.element("quoteButton").click();
+  chrome.eventSource().listeners.get("chrome-reload")({ data: JSON.stringify({ reason: "upgrade" }) });
+  await flushPromises();
+  chrome.advanceClock(5100);
+  chrome.runTimers(100);
+  await flushPromises();
+  assert.equal(chrome.element("outdatedBanner").hidden, false);
+  assert.equal(chrome.reloadCount(), 0);
+  assert.match(chrome.element("chatQuotes").innerHTML, /five/);
 });

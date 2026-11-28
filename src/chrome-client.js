@@ -1243,7 +1243,7 @@ function setReviewState(state) {
 }
 
 function hasUnsentDraft() {
-  if (editingPromptId) return true;
+  if (editingPromptId || composerQuotes.length) return true;
   return Boolean(lastReviewState && lastReviewState.card && String(lastReviewState.card.text || "").trim());
 }
 
@@ -2014,7 +2014,7 @@ function commitQueuedEdit() {
   endQueuedEdit();
   const prompt = queued[index];
   if (!isPromptEditable(prompt)) return false;
-  if (!text && !attachmentCount(prompt)) {
+  if (!text && !attachmentCount(prompt) && !promptQuotes(prompt).length) {
     queued.splice(index, 1);
     afterQueuedPromptRemoved();
   } else {
@@ -2484,7 +2484,7 @@ function renderComposerQuotes() {
 function chatSelectionQuote() {
   if (typeof document.getSelection !== "function") return null;
   const selection = document.getSelection();
-  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+  if (!selection || selection.isCollapsed || selection.rangeCount !== 1) return null;
   const range = selection.getRangeAt(0);
   const bubbleOf = (node) => {
     const element = node && node.nodeType === 1 ? node : node?.parentElement;
@@ -2493,8 +2493,8 @@ function chatSelectionQuote() {
   };
   const bubble = bubbleOf(range.startContainer);
   if (!bubble || bubble !== bubbleOf(range.endContainer)) return null;
-  const text = selection.toString().trim();
-  if (!text) return null;
+  const text = selection.toString();
+  if (!text.trim()) return null;
   /** @type {"agent" | "user"} */
   const from = bubble.getAttribute("data-chat-role") === "agent" ? "agent" : "user";
   return { quote: { from, text }, rect: range.getBoundingClientRect() };
@@ -2517,23 +2517,20 @@ function updateQuoteButton() {
   const { rect } = found;
   const width = quoteButton.offsetWidth;
   const height = quoteButton.offsetHeight;
-  const viewportWidth = Number(window.innerWidth) || 0;
-  const viewportHeight = Number(window.innerHeight) || 0;
+  const viewport = window.visualViewport;
+  const minX = (viewport?.offsetLeft || 0) / layoutZoom + QUOTE_BUTTON_GAP_PX;
+  const minY = (viewport?.offsetTop || 0) / layoutZoom + QUOTE_BUTTON_GAP_PX;
+  const maxX = minX + (viewport?.width ?? window.innerWidth) / layoutZoom - 2 * QUOTE_BUTTON_GAP_PX - width;
+  const maxY = minY + (viewport?.height ?? window.innerHeight) / layoutZoom - 2 * QUOTE_BUTTON_GAP_PX - height;
+  const aboveTop = rect.top / layoutZoom - height - QUOTE_BUTTON_GAP_PX;
+  const belowTop = rect.bottom / layoutZoom + QUOTE_BUTTON_GAP_PX;
   const below = mediaMatches("(pointer: coarse)");
-  let top = below ? rect.bottom + QUOTE_BUTTON_GAP_PX : rect.top - height - QUOTE_BUTTON_GAP_PX;
+  let top = below ? belowTop : aboveTop;
   // 放不下时换到另一侧，再夹回视口内。
-  if (!below && top < QUOTE_BUTTON_GAP_PX) top = rect.bottom + QUOTE_BUTTON_GAP_PX;
-  if (below && top + height > viewportHeight - QUOTE_BUTTON_GAP_PX) top = rect.top - height - QUOTE_BUTTON_GAP_PX;
-  top = Math.min(
-    Math.max(top, QUOTE_BUTTON_GAP_PX),
-    Math.max(QUOTE_BUTTON_GAP_PX, viewportHeight - height - QUOTE_BUTTON_GAP_PX),
-  );
-  const left = Math.min(
-    Math.max(rect.left, QUOTE_BUTTON_GAP_PX),
-    Math.max(QUOTE_BUTTON_GAP_PX, viewportWidth - width - QUOTE_BUTTON_GAP_PX),
-  );
-  quoteButton.style.top = top + "px";
-  quoteButton.style.left = left + "px";
+  if (!below && top < minY) top = belowTop;
+  if (below && top > maxY) top = aboveTop;
+  quoteButton.style.top = Math.max(minY, Math.min(top, maxY)) + "px";
+  quoteButton.style.left = Math.max(minX, Math.min(rect.left / layoutZoom, maxX)) + "px";
 }
 
 function addSelectedQuote() {
@@ -4948,6 +4945,7 @@ window.addEventListener("message", (event) => {
     postToFrame({ type: "lavish:setAnnotationMode", enabled: annotation && !ended });
   }
   if (msg.type === "lavish:queuePrompt") {
+    if (msg.prompt?.target?.type === CHAT_QUOTE_TARGET_TYPE) delete msg.prompt.target;
     enqueuePrompt(msg.prompt);
     // Queued from inside the artifact, where the closed dock is the only sign it landed.
     pulseSheetDock();
