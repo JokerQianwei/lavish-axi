@@ -758,6 +758,9 @@ async function createChromeHarness({
     },
     // Models the reader selecting `text` inside `node` (a chat bubble or something else): installs
     // what document.getSelection() reports and fires selectionchange the way the browser does.
+    selectionText() {
+      return typeof context.document.getSelection === "function" ? context.document.getSelection().toString() : "";
+    },
     selectChatText(node, text, rect = { top: 300, bottom: 320, left: 100, right: 260 }, ranges = text ? 1 : 0) {
       context.document.getSelection = () => ({
         get isCollapsed() {
@@ -10298,6 +10301,8 @@ test("a zoomed phone flips and clamps Quote inside the visual viewport", async (
       visualViewport: { offsetLeft: 60, offsetTop: 100, width: 600, height: 500 },
     },
   });
+  // 手机上聊天在底部面板里，先打开面板才可能选中聊天文字。
+  chrome.element("panelHead").dispatch("click", {});
   const button = chrome.element("quoteButton");
   button.offsetWidth = 60;
   button.offsetHeight = 24;
@@ -10324,6 +10329,7 @@ test("Quote follows the visible intersection on viewport and panel changes", asy
   const { chrome, agentBubble } = await chromeWithTranscript({
     device: { ...DESKTOP_SITE_PHONE, innerWidth: 800, visualViewport: viewport },
   });
+  chrome.element("panelHead").dispatch("click", {});
   const rect = { top: 300, bottom: 320, left: 100, right: 260 };
   const button = chrome.element("quoteButton");
   button.offsetWidth = 60;
@@ -10356,4 +10362,32 @@ test("a quote-only draft holds back a restart reload", async () => {
   assert.equal(chrome.element("outdatedBanner").hidden, false);
   assert.equal(chrome.reloadCount(), 0);
   assert.match(chrome.element("chatQuotes").innerHTML, /five/);
+});
+
+// 收起聊天面板后选区已看不见：按钮撤下、待引用选区丢弃，已经加入输入框的卡片保留；
+// 面板收起期间再出现的选区变化也不会让按钮回来。
+test("collapsing the conversation withdraws Quote and keeps the cards already added", async () => {
+  const { chrome, agentBubble, userBubble } = await chromeWithTranscript({ mobile: true });
+  chrome.element("panelHead").dispatch("click", {});
+  chrome.selectChatText(agentBubble, "five batches");
+  chrome.element("quoteButton").click();
+  chrome.selectChatText(userBubble, "batch two");
+  assert.equal(chrome.element("quoteButton").hidden, false);
+
+  chrome.element("panelHead").dispatch("click", {});
+  assert.equal(chrome.element("quoteButton").hidden, true);
+  assert.equal(chrome.selectionText(), "", "the pending chat selection is dropped");
+  assert.equal((chrome.element("chatQuotes").innerHTML.match(/class="chat-quote"/g) || []).length, 1);
+
+  chrome.selectChatText(userBubble, "batch two");
+  assert.equal(chrome.element("quoteButton").hidden, true, "a selection while collapsed offers nothing");
+});
+
+test("folding the desktop sidebar withdraws Quote", async () => {
+  const { chrome, agentBubble } = await chromeWithTranscript();
+  chrome.selectChatText(agentBubble, "five batches");
+  assert.equal(chrome.element("quoteButton").hidden, false);
+  chrome.element("sidebarToggle").click();
+  assert.equal(chrome.element("quoteButton").hidden, true);
+  assert.equal(chrome.selectionText(), "");
 });

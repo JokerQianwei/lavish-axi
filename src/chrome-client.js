@@ -114,6 +114,13 @@ const chatAttachments = /** @type {HTMLDivElement} */ (document.getElementById("
 const chatAttachButton = /** @type {HTMLButtonElement} */ (document.getElementById("chatAttach"));
 const chatQuotes = /** @type {HTMLDivElement} */ (document.getElementById("chatQuotes"));
 const quoteButton = /** @type {HTMLButtonElement} */ (document.getElementById("quoteButton"));
+// 引用状态在这里声明而不是放在「Chat quotes」一节：面板收起逻辑（applySheetState 等）在启动时就会
+// 运行并撤下引用按钮，必须先于那一节可用。
+/** @type {{ from: "agent" | "user", text: string }[]} */
+let composerQuotes = [];
+/** @type {{ from: "agent" | "user", text: string } | null} */
+let selectedQuote = null;
+let pointerSelecting = false;
 const chatAttachInput = /** @type {HTMLInputElement} */ (document.getElementById("chatAttachInput"));
 const chatAttachmentNotice = /** @type {HTMLSpanElement} */ (document.getElementById("chatAttachmentNotice"));
 const panel = /** @type {HTMLElement} */ (document.getElementById("panel"));
@@ -1631,6 +1638,7 @@ function applySheetState() {
   panelToggle.setAttribute("aria-expanded", open ? "true" : "false");
   panelToggle.setAttribute("aria-label", open ? "Hide conversation" : "Show conversation");
   renderSheetSummary();
+  dismissQuoteForHiddenConversation();
 }
 
 // What the closed dock says. One line, most actionable state first: work the user has queued,
@@ -1827,6 +1835,7 @@ function applyPanelCollapsed() {
   if (collapsed && activeElement && panel.contains(activeElement)) sidebarToggle.focus();
   sidebarToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
   renderSidebarToggle();
+  dismissQuoteForHiddenConversation();
 }
 
 // While collapsed the toggle stands in for the panel: it counts queued notes (the thing still to
@@ -2438,11 +2447,6 @@ const chatAttachmentController = createChatAttachmentsController();
 
 // ---- Chat quotes ----
 const QUOTE_BUTTON_GAP_PX = 8;
-/** @type {{ from: "agent" | "user", text: string }[]} */
-let composerQuotes = [];
-/** @type {{ from: "agent" | "user", text: string } | null} */
-let selectedQuote = null;
-let pointerSelecting = false;
 
 function setComposerQuotes(quotes) {
   composerQuotes = quotes;
@@ -2502,8 +2506,18 @@ function hideQuoteButton() {
   if (quoteButton) quoteButton.hidden = true;
 }
 
+// 聊天面板被收起（手机底部面板放下、桌面侧栏折叠）时，选区已经看不见：撤下按钮并丢弃聊天里的
+// 待引用选区，已加入输入框的卡片不受影响。由面板状态变化和每次按钮更新调用。
+function dismissQuoteForHiddenConversation() {
+  if (!isConversationHidden()) return false;
+  if (chatSelectionQuote()) document.getSelection()?.removeAllRanges();
+  hideQuoteButton();
+  return true;
+}
+
 function updateQuoteButton() {
   if (!quoteButton) return;
+  if (dismissQuoteForHiddenConversation()) return;
   const found = ended || terminalSubmission !== null || pointerSelecting ? null : chatSelectionQuote();
   if (!found) {
     hideQuoteButton();
