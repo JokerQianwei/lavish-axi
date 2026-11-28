@@ -687,6 +687,12 @@ body.lavish {
   cursor: pointer;
 }
 
+/* 图标只在窄屏紧凑形态出现，见文件末尾的窄屏顶栏规则。 */
+.revisions-button > svg {
+  display: none;
+  flex-shrink: 0;
+}
+
 .revisions-button:hover {
   background: var(--bg-hover);
   color: var(--fg);
@@ -1845,6 +1851,14 @@ body.layout-gate-active iframe#artifact {
     width: auto;
     max-height: min(calc(var(--layout-vh, 100vh) * 0.7), 460px);
   }
+  /* 修订记录抽屉同理：右对齐按钮时在 320px 下左边会伸出视口，改为横跨视口；列表自身已限高滚动。 */
+  .revisions-drawer {
+    position: fixed;
+    top: calc(var(--bar-h) + 8px);
+    right: 12px;
+    left: 12px;
+    width: auto;
+  }
 }
 /* Phone-width chrome: the artifact takes the whole viewport above a persistent conversation dock,
    and the conversation itself is a bottom sheet the dock raises over a scrim. A side-by-side or
@@ -2154,4 +2168,26 @@ body.layout-gate-active iframe#artifact {
 }
 .whiteboard-error[hidden] {
   display: none;
+}
+
+/* 窄屏顶栏：320–430px 宽时品牌、布局警告、修订记录、批注开关和 More 排成一行放不下，More 会被挤出
+   视口，用户就无法发布或结束会话。修订记录先改成图标加数量（无障碍名称由 aria-label 提供），
+   375px 起的手机这样就够；更窄且布局警告也出现时，再把批注开关的文字改为仅读屏可见，开关本身保留。 */
+@media (max-width: 430px) {
+  .revisions-button > svg {
+    display: block;
+  }
+  .revisions-button-text {
+    display: none;
+  }
+}
+@media (max-width: 374px) {
+  .bar:has(.warnings-wrap:not([hidden])):has(.revisions-wrap:not([hidden])) .annotate-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
 }
