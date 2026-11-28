@@ -4839,9 +4839,7 @@ async function reloadChromeAfterServerRestart(reason = "") {
     return;
   }
 
-  // Unsent annotation text is the user's writing. A reload replays it, but it is still their
-  // call when to interrupt the card they are typing into, so offer the reload instead of taking
-  // it. The same applies to a page the user is only reading: the banner never reloads by itself.
+  // 即使草稿能恢复，也不能自动打断编辑；输入框里的引用卡片还会随页面重载丢失。
   if (hasUnsentDraft()) {
     chromeRestartReloadPromise = null;
     // The line this page shows comes from the same reason its siblings were sent. An event that
