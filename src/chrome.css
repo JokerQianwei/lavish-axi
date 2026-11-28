@@ -1392,9 +1392,7 @@ body.lavish {
   border-radius: 4px;
   padding: 0 4px;
 }
-/* Delivery receipt: the per-note view of agent presence (docs/delivery-acks.md). Three emoji
-   (seen, working, done) that light up as the server observes each step; a step that has not
-   happened is the same glyph greyed and dimmed, so the row always shows what is still to come. */
+/* 回执按备注显示送达进度；状态含义见 docs/delivery-acks.md。 */
 .receipt {
   display: flex;
   flex-wrap: wrap;

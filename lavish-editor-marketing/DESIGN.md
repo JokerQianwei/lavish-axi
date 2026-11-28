@@ -3,7 +3,7 @@
 ## Style Prompt
 
 Create a calm, premium product demo that feels like a late-evening reading room around a precise technical artifact.
-The product surface is dark ink chrome, cream type, and one brass attention color.
+The video's mock interface uses dark ink chrome, cream type, and one brass attention color; it does not define the live review shell's styles.
 The video should feel polished, restrained, and browser-native, with the artifact as the bright paper surface inside the room.
 
 ## Colors
