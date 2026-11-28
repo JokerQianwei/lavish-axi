@@ -602,8 +602,8 @@ body.lavish {
   display: none;
 }
 .more-menu {
-  max-height: calc(100vh - var(--bar-h));
-  max-height: calc(100dvh - var(--bar-h));
+  max-height: calc(var(--layout-vh, 100vh) - var(--bar-h));
+  max-height: calc(var(--layout-vh, 100dvh) - var(--bar-h));
   overflow-y: auto;
   right: 0;
   top: 40px;
