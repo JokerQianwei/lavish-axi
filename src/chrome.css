@@ -179,8 +179,8 @@ body.lavish {
   opacity: 0.55;
 }
 .switch-track {
-  width: 34px;
-  height: 20px;
+  width: 40px;
+  height: 24px;
   border-radius: var(--radius-pill);
   background: var(--border);
   position: relative;
@@ -189,8 +189,8 @@ body.lavish {
 }
 .switch-knob {
   position: absolute;
-  top: 2px;
-  left: 2px;
+  top: 4px;
+  left: 4px;
   width: 16px;
   height: 16px;
   border-radius: var(--radius-pill);
@@ -203,7 +203,7 @@ body.lavish {
   background: var(--accent);
 }
 .annotate-switch[aria-pressed="true"] .switch-knob {
-  left: 16px;
+  left: 20px;
   background: var(--accent-ink);
 }
 .visually-hidden {
@@ -448,8 +448,6 @@ body.lavish {
   opacity: 0.45;
 }
 .warnings-foot {
-  /* 列表在页脚下滚动，用一条发丝线标出边界，被截断的行读起来是“可滚动”而不是“坏了”。 */
-  border-top: var(--hairline-subtle);
   padding: 12px var(--space-8) 16px;
   display: flex;
   flex-direction: column;
@@ -808,7 +806,6 @@ body.lavish {
 
 .revisions-foot {
   padding: 12px 16px 16px;
-  border-top: var(--hairline-subtle);
 }
 
 .revisions-note {
