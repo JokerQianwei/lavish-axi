@@ -1723,6 +1723,98 @@ body.lavish {
 .composer.is-dropping {
   background: var(--bg-elevated);
 }
+/* 引用卡片：输入框上方一排，每张显示选中文字的前三行和出处，可单独移除。完整原文随消息发出。 */
+.chat-quotes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 176px;
+  overflow-y: auto;
+}
+.chat-quotes:empty {
+  display: none;
+}
+.chat-quote {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 176px;
+  max-width: 100%;
+  padding: 12px;
+  border: var(--hairline);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+}
+.chat-quote-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  font-size: var(--text-xs);
+  line-height: var(--lh-sm);
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.chat-quote-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.chat-quote-from {
+  font-size: 11px;
+  font-weight: var(--w-medium);
+  color: var(--fg-faint);
+}
+.chat-quote-remove {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-dim);
+  cursor: pointer;
+}
+.chat-quote-remove:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.chat-quote-remove:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+/* 选中聊天记录后浮出的 Quote 按钮。fixed 定位由 chrome-client.js 按选区计算，层级高于手机会话面板。 */
+.quote-button {
+  position: fixed;
+  z-index: 75;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border: var(--hairline);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--fg);
+  box-shadow: var(--shadow-tooltip);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--w-medium);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.quote-button[hidden] {
+  display: none;
+}
+.quote-button:hover {
+  background: var(--bg-hover);
+}
 .chat-attachments {
   display: grid;
   gap: 8px;

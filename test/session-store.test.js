@@ -42,6 +42,58 @@ function feedbackResult(result) {
   );
 }
 
+// 引用聊天记录：agent 拿到完整原文与说话方，非法条目被丢弃；对话记录只存截断摘录用于显示。
+test("a chat-quote message reaches the agent with every quote in full and the transcript keeps excerpts", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "lavish-store-"));
+  try {
+    const stateFile = path.join(dir, "state.json");
+    const artifact = path.join(dir, "artifact.html");
+    await writeFile(artifact, "<h1>Hello</h1>");
+    const store = new SessionStore(stateFile);
+    const session = await store.upsertSession(artifact, "http://localhost:4387/session/test");
+    const long = "Ship in five batches. ".repeat(40).trim();
+    await store.queuePrompts(session.key, {
+      domSnapshot: "",
+      prompts: [
+        {
+          uid: "",
+          prompt: "",
+          selector: "",
+          tag: "message",
+          text: "The user quoted earlier messages from this conversation",
+          target: {
+            type: "chat-quote",
+            extra: "dropped",
+            quotes: [
+              { from: "agent", text: long, html: "<b>dropped</b>" },
+              { from: "system", text: "not a chat author" },
+              { from: "user", text: "   " },
+              { from: "user", text: "Can batch two move earlier?" },
+            ],
+          },
+        },
+      ],
+    });
+
+    const feedback = feedbackResult(await store.takeFeedback(session.key));
+    assert.deepEqual(feedback.prompts[0].target, {
+      type: "chat-quote",
+      quotes: [
+        { from: "agent", text: long },
+        { from: "user", text: "Can batch two move earlier?" },
+      ],
+    });
+    const entry = (await store.findByKey(session.key)).chat.at(-1);
+    assert.equal(entry.kind, "message");
+    assert.equal(entry.quotes.length, 2);
+    assert.equal(entry.quotes[0].from, "agent");
+    assert.equal(entry.quotes[0].excerpt.length, 120);
+    assert.deepEqual(entry.quotes[1], { from: "user", excerpt: "Can batch two move earlier?" });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("queued prompts are returned with DOM snapshot context and then cleared", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "lavish-store-"));
   try {

@@ -17,9 +17,11 @@ import {
 import { AsyncMutex } from "./async-mutex.js";
 import {
   boundStoredChat,
+  CHAT_QUOTE_TARGET_TYPE,
   chatEntryForPrompt,
   collectChatAckIds,
   markPreReceipt,
+  normalizeChatQuoteTarget,
   normalizePromptId,
   stampDelivered,
   stampDone,
@@ -1150,6 +1152,7 @@ function normalizeTarget(target) {
   if (target.type === "mermaid-node") return normalizeMermaidNodeTarget(target);
   if (target.type === EXCALIDRAW_SCENE_TARGET_TYPE) return normalizeExcalidrawSceneTarget(target);
   if (target.type === LAYOUT_WARNINGS_TARGET_TYPE) return normalizeLayoutWarningsTarget(target);
+  if (target.type === CHAT_QUOTE_TARGET_TYPE) return normalizeChatQuoteTarget(target);
   // text-range and any other/legacy target shapes pass through unchanged.
   return JSON.parse(JSON.stringify(target));
 }

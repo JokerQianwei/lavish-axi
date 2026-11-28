@@ -231,6 +231,13 @@ async function createChromeHarness({
         if (handler) handler(event);
       },
       querySelectorAll(selector) {
+        if (id === "chatQuotes" && selector === ".chat-quote-remove") {
+          return [...this.innerHTML.matchAll(/class="chat-quote-remove"[^>]*data-index="(\d+)"/g)].map((match) => {
+            const remove = element(`chat-quote-remove-${match[1]}`);
+            remove.dataset.index = match[1];
+            return remove;
+          });
+        }
         if (id === "queuedLog" && selector === ".queued-remove") {
           return [...this.innerHTML.matchAll(/class="queued-remove"[^>]*data-index="(\d+)"/g)].map((match) => {
             const close = element(`queued-remove-${match[1]}`);
@@ -493,9 +500,19 @@ async function createChromeHarness({
       createElement(tag) {
         const el = element(`${tag}-${elements.size}`);
         el.tagName = tag.toUpperCase();
+        el.nodeType = 1;
         el.attrs = {};
         el.setAttribute = (name, value) => (el.attrs[name] = String(value));
         el.getAttribute = (name) => (name in el.attrs ? el.attrs[name] : null);
+        // Attribute selectors only (`[data-chat-role]`): enough for the chat-quote selection lookup.
+        el.closest = (selector) => {
+          const attribute = /^\[([\w-]+)\]$/.exec(selector)?.[1];
+          for (let current = el; current && attribute; current = current.parentElement) {
+            if (current.getAttribute?.(attribute) !== null && current.getAttribute?.(attribute) !== undefined)
+              return current;
+          }
+          return null;
+        };
         el.replaceWith = (next) => {
           if (tabIcon === el) tabIcon = next;
         };
@@ -736,6 +753,25 @@ async function createChromeHarness({
       };
       for (const { handler } of handlers) handler(event);
       return event;
+    },
+    // Models the reader selecting `text` inside `node` (a chat bubble or something else): installs
+    // what document.getSelection() reports and fires selectionchange the way the browser does.
+    selectChatText(node, text, rect = { top: 300, bottom: 320, left: 100, right: 260 }) {
+      let ranges = text ? 1 : 0;
+      context.document.getSelection = () => ({
+        get isCollapsed() {
+          return ranges === 0;
+        },
+        get rangeCount() {
+          return ranges;
+        },
+        getRangeAt: () => ({ startContainer: node, endContainer: node, getBoundingClientRect: () => rect }),
+        toString: () => (ranges ? text : ""),
+        removeAllRanges() {
+          ranges = 0;
+        },
+      });
+      for (const { handler } of documentListeners.get("selectionchange") || []) handler({});
     },
     dispatchDocumentEvent(type, eventProps = {}) {
       const event = {
@@ -10106,4 +10142,128 @@ test("the theme toggle still works when the browser refuses localStorage", async
 
   chrome.element("themeToggle").click();
   assert.equal(rootTheme(chrome), "light");
+});
+
+// ---- Chat quotes ----
+// 引用聊天记录的契约（来自需求）：只有对话记录里的消息能引用；选中后出现 Quote 按钮，点击后输入框上方
+// 出现引用卡片，可多段、可移除、可不写文字直接发送；发出的消息带完整原文和说话方，历史里显示引用。
+
+async function chromeWithTranscript(options = {}) {
+  const chrome = await createChromeHarness(options);
+  chrome.eventSource().listeners.get("chat-sync")({
+    data: JSON.stringify({
+      chat: [
+        { role: "agent", text: "Agent plan: ship in five batches, one hour apart." },
+        { role: "user", kind: "message", text: "Can batch two move earlier?" },
+      ],
+    }),
+  });
+  await flushPromises();
+  const bubbles = chrome.element("chatLog").children.filter((child) => child.getAttribute?.("data-chat-role"));
+  return { chrome, agentBubble: bubbles[0], userBubble: bubbles[1] };
+}
+
+test("selecting text inside a sent message offers Quote, and selecting elsewhere does not", async () => {
+  const { chrome, agentBubble } = await chromeWithTranscript();
+
+  chrome.selectChatText(agentBubble, "five batches");
+  assert.equal(chrome.element("quoteButton").hidden, false);
+
+  chrome.selectChatText(chrome.element("chatInput"), "typed words");
+  assert.equal(chrome.element("quoteButton").hidden, true, "the composer is not part of the transcript");
+
+  chrome.selectChatText(agentBubble, "five batches");
+  chrome.selectChatText(agentBubble, "");
+  assert.equal(chrome.element("quoteButton").hidden, true, "clearing the selection hides the button");
+});
+
+test("Quote adds a removable card and sends the full quoted text with who wrote it", async () => {
+  const posts = [];
+  const long = "Agent plan: ship in five batches, one hour apart. ".repeat(6).trim();
+  const { chrome, agentBubble, userBubble } = await chromeWithTranscript({
+    fetchImpl: async (url, init = {}) => {
+      posts.push({ url, body: init.body ? JSON.parse(init.body) : null });
+      return { ok: true, json: async () => ({ status: "queued" }) };
+    },
+  });
+
+  chrome.selectChatText(agentBubble, long);
+  chrome.element("quoteButton").click();
+  chrome.selectChatText(userBubble, "Can batch two move earlier?");
+  chrome.element("quoteButton").click();
+  assert.equal(chrome.element("quoteButton").hidden, true);
+  assert.equal((chrome.element("chatQuotes").innerHTML.match(/class="chat-quote"/g) || []).length, 2);
+
+  // Sending with no typed words still delivers the quotes.
+  chrome.element("send").click();
+  chrome.runTimers(5000);
+  await flushPromises();
+  await flushPromises();
+
+  const sent = posts.find((post) => post.url === "/api/abc/prompts").body.prompts[0];
+  assert.equal(sent.tag, "message");
+  assert.equal(sent.prompt, "");
+  assert.equal(sent.text, "The user quoted earlier messages from this conversation");
+  assert.deepEqual(sent.target, {
+    type: "chat-quote",
+    quotes: [
+      { from: "agent", text: long },
+      { from: "user", text: "Can batch two move earlier?" },
+    ],
+  });
+  assert.equal(chrome.element("chatQuotes").innerHTML, "", "sending clears the cards");
+});
+
+test("removing a quote card drops it from the next message", async () => {
+  const posts = [];
+  const { chrome, agentBubble, userBubble } = await chromeWithTranscript({
+    fetchImpl: async (url, init = {}) => {
+      posts.push({ url, body: init.body ? JSON.parse(init.body) : null });
+      return { ok: true, json: async () => ({ status: "queued" }) };
+    },
+  });
+  chrome.selectChatText(agentBubble, "five batches");
+  chrome.element("quoteButton").click();
+  chrome.selectChatText(userBubble, "batch two");
+  chrome.element("quoteButton").click();
+
+  const [firstRemove] = chrome.element("chatQuotes").querySelectorAll(".chat-quote-remove");
+  firstRemove.click();
+  chrome.element("chatInput").value = "Why?";
+  chrome.element("send").click();
+  chrome.runTimers(5000);
+  await flushPromises();
+  await flushPromises();
+
+  const sent = posts.find((post) => post.url === "/api/abc/prompts").body.prompts[0];
+  assert.equal(sent.prompt, "Why?");
+  assert.deepEqual(sent.target.quotes, [{ from: "user", text: "batch two" }]);
+});
+
+test("the chrome's queued quotes agree with the server's transcript quotes", async () => {
+  const prompt = {
+    prompt: "Why?",
+    selector: "",
+    tag: "message",
+    text: "The user quoted earlier messages from this conversation",
+    target: {
+      type: "chat-quote",
+      quotes: [
+        { from: "agent", text: "x".repeat(300) },
+        { from: "user", text: "  batch   two  " },
+      ],
+    },
+  };
+  const expected = chatEntryForPrompt({ uid: "", ...prompt }, "2026-09-15T00:00:00.000Z").quotes;
+  const chrome = await createChromeHarness();
+  chrome.sendFrameMessage({ type: "lavish:queuePrompt", prompt });
+  const rendered = [
+    ...chrome
+      .element("queuedLog")
+      .innerHTML.matchAll(
+        /<div class="anchor quote" title="Quoted from (the agent|you): ([^"]*)"><span class="anchor-kind">quote<\/span><span class="anchor-excerpt">\u201C([^<]*)\u201D<\/span><\/div>/g,
+      ),
+  ].map((match) => ({ from: match[1] === "the agent" ? "agent" : "user", excerpt: match[3] }));
+  assert.deepEqual(rendered, expected);
+  assert.equal(expected[0].excerpt.length, 120, "the transcript shows an excerpt, not the full quote");
 });

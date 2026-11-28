@@ -499,6 +499,39 @@ function bound(value, max) {
   return text.slice(0, max - 1) + "…";
 }
 
+// 引用聊天记录：用户在聊天栏选中一段已发送消息、点 Quote 后，作为 composer 消息的 target 发出。
+// target.quotes 保留选中的完整原文和说话方（agent 或 user），原样交给 agent；对话记录只存截断后的
+// 摘录（entry.quotes）用于显示，所以界面截断不影响 agent 收到的内容。
+export const CHAT_QUOTE_TARGET_TYPE = "chat-quote";
+
+/**
+ * 把客户端提交的引用 target 收窄成固定形状；没有任何有效引用时返回 null（消息照常发送，不带 target）。
+ * 只保留 from 为 agent/user、text 非空白的条目，text 不截断。
+ */
+export function normalizeChatQuoteTarget(target) {
+  const quotes = (Array.isArray(target?.quotes) ? target.quotes : [])
+    .filter(
+      (quote) =>
+        quote &&
+        typeof quote === "object" &&
+        (quote.from === "agent" || quote.from === "user") &&
+        typeof quote.text === "string" &&
+        quote.text.trim(),
+    )
+    .map((quote) => ({ from: quote.from, text: quote.text }));
+  return quotes.length ? { type: CHAT_QUOTE_TARGET_TYPE, quotes } : null;
+}
+
+// 对话记录里显示的引用摘录。chrome-client.js 的 promptQuotes 用同一规则显示排队中的消息，
+// 两处由 test/chrome-client-queue.test.js 固定为一致，消息送达前后显示不变。
+function promptQuotes(prompt) {
+  const target = prompt.target && typeof prompt.target === "object" ? prompt.target : null;
+  if (target?.type !== CHAT_QUOTE_TARGET_TYPE || !Array.isArray(target.quotes)) return [];
+  return target.quotes
+    .map((quote) => ({ from: quote?.from === "agent" ? "agent" : "user", excerpt: bound(quote?.text, EXCERPT_MAX) }))
+    .filter((quote) => quote.excerpt);
+}
+
 function withSelector(anchor, selector) {
   if (selector) anchor.selector = selector;
   return anchor;
@@ -578,10 +611,12 @@ export function chatEntryForPrompt(prompt, at) {
           : "annotation";
   const promptId = normalizePromptId(prompt.prompt_id);
   const anchor = promptAnchor(prompt, kind);
-  if (!text && attachments.length === 0 && !promptId && !anchor) return null;
+  const quotes = promptQuotes(prompt);
+  if (!text && attachments.length === 0 && !promptId && !anchor && quotes.length === 0) return null;
   const entry = { role: "user", kind, text, at: String(at || new Date().toISOString()) };
   if (promptId) entry.prompt_id = promptId;
   if (anchor) entry.anchor = anchor;
+  if (quotes.length) entry.quotes = quotes;
   if (attachments.length) entry.attachments = attachments;
   return entry;
 }

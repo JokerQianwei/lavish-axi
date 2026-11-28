@@ -112,6 +112,8 @@ const chatComposer = /** @type {HTMLDivElement} */ (document.getElementById("cha
 const chatInput = /** @type {HTMLTextAreaElement} */ (document.getElementById("chatInput"));
 const chatAttachments = /** @type {HTMLDivElement} */ (document.getElementById("chatAttachments"));
 const chatAttachButton = /** @type {HTMLButtonElement} */ (document.getElementById("chatAttach"));
+const chatQuotes = /** @type {HTMLDivElement} */ (document.getElementById("chatQuotes"));
+const quoteButton = /** @type {HTMLButtonElement} */ (document.getElementById("quoteButton"));
 const chatAttachInput = /** @type {HTMLInputElement} */ (document.getElementById("chatAttachInput"));
 const chatAttachmentNotice = /** @type {HTMLSpanElement} */ (document.getElementById("chatAttachmentNotice"));
 const panel = /** @type {HTMLElement} */ (document.getElementById("panel"));
@@ -503,6 +505,9 @@ const EDIT_ICON_SVG =
 const ANCHOR_EXCERPT_MAX = 120;
 const ANCHOR_SELECTOR_MAX = 512;
 const ANCHOR_LABEL_MAX = 40;
+const CHAT_QUOTE_TARGET_TYPE = "chat-quote";
+// 引用消息自带的说明，agent 和转发 poll 输出的上层（如去掉 next_step 的机器人）都能直接读到。
+const CHAT_QUOTE_PROMPT_TEXT = "The user quoted earlier messages from this conversation";
 
 function boundAnchorText(value, max) {
   const text = String(value || "")
@@ -565,6 +570,34 @@ function promptAnchor(prompt) {
   });
 }
 
+// 消息引用的聊天记录摘录，与 src/chat-messages.js 的 promptQuotes 同一规则（本文件不能 import）；
+// test/chrome-client-queue.test.js 固定两处一致，排队中与送达后显示相同。完整原文只在 target 里发给 agent。
+function promptQuotes(prompt) {
+  const target = prompt?.target && typeof prompt.target === "object" ? prompt.target : null;
+  if (target?.type !== CHAT_QUOTE_TARGET_TYPE || !Array.isArray(target.quotes)) return [];
+  return target.quotes
+    .map((quote) => ({
+      from: quote?.from === "agent" ? "agent" : "user",
+      excerpt: boundAnchorText(quote?.text, ANCHOR_EXCERPT_MAX),
+    }))
+    .filter((quote) => quote.excerpt);
+}
+
+// 每段引用一行，沿用锚点行的样式：chip 写 quote，悬停显示出自谁。
+function quotesHtml(quotes) {
+  if (!Array.isArray(quotes)) return "";
+  return quotes
+    .map(
+      (quote) =>
+        '<div class="anchor quote" title="' +
+        escapeHtml((quote.from === "agent" ? "Quoted from the agent: " : "Quoted from you: ") + quote.excerpt) +
+        '"><span class="anchor-kind">quote</span><span class="anchor-excerpt">\u201C' +
+        escapeHtml(quote.excerpt) +
+        "\u201D</span></div>",
+    )
+    .join("");
+}
+
 // The anchor line: a mono chip naming the kind (`<h2>`, `text`, `cell`, ...) and a quoted
 // excerpt, with the full excerpt and selector on hover.
 function anchorHtml(anchor) {
@@ -621,6 +654,7 @@ function queuedBubbleHtml(prompt, index) {
     REMOVE_ICON_SVG +
     "</button></small>" +
     anchorHtml(promptAnchor(prompt)) +
+    quotesHtml(promptQuotes(prompt)) +
     userBubbleTextHtml(prompt, prompt.prompt) +
     bubbleAttachmentsHtml(prompt) +
     "</div>"
@@ -635,6 +669,7 @@ function queuedEditorHtml(prompt, index) {
     index +
     '"><small>Editing</small>' +
     anchorHtml(promptAnchor(prompt)) +
+    quotesHtml(promptQuotes(prompt)) +
     '<textarea class="queued-edit-input" aria-label="Edit queued prompt" data-index="' +
     index +
     '">' +
@@ -918,6 +953,7 @@ function chatBubbleHtml(entry) {
   return (
     "<small>You</small>" +
     anchorHtml(entry.anchor) +
+    quotesHtml(entry.quotes) +
     userBubbleTextHtml(entry, entry.text) +
     bubbleAttachmentsHtml(entry) +
     receiptHtml(entry)
@@ -992,10 +1028,13 @@ function addChat(entry, shouldScroll = true) {
   if (!entry || typeof entry !== "object") return;
   const role = entry.role === "agent" ? "agent" : "user";
   const text = String(entry.text || "");
-  if (!text && !(role === "agent" ? entry.html : attachmentCount(entry) || entry.anchor)) return;
+  const quoted = Array.isArray(entry.quotes) && entry.quotes.length > 0;
+  if (!text && !(role === "agent" ? entry.html : attachmentCount(entry) || entry.anchor || quoted)) return;
 
   const el = document.createElement("div");
   el.className = "bubble " + role;
+  // 只有对话记录里的消息可以被引用（不含排队气泡、工作中提示与退役草稿），说话方取自这里。
+  el.setAttribute("data-chat-role", role);
   el.innerHTML = chatBubbleHtml({ ...entry, role, text });
   chatLog.appendChild(el);
   if (shouldScroll) scrollElementIntoView(el);
@@ -1008,6 +1047,7 @@ function chatEntryDisplayKey(entry) {
     kind: entry?.kind,
     text: String(entry?.text || ""),
     anchor: entry?.anchor,
+    quotes: entry?.quotes,
     attachments: Array.isArray(entry?.attachments) ? entry.attachments.map((item) => String(item?.id || "")) : [],
   });
 }
@@ -2396,6 +2436,140 @@ function createChatAttachmentsController() {
 
 const chatAttachmentController = createChatAttachmentsController();
 
+// ---- Chat quotes ----
+// 在聊天栏选中一条已发送消息里的文字，就近浮出 Quote 按钮；点击后选中的原文成为输入框上方的一张
+// 引用卡片，可以叠加多段、逐张移除，和输入的文字一起作为一条 composer 消息发出（见 sendQueued）。
+// 卡片只截断显示，发出的是完整原文。选区必须落在同一条消息内，这样每段引用都有确定的说话方。
+// 手机上系统选择菜单在选区上方，按钮放到选区下方避开它；桌面放在选区上方。
+const QUOTE_BUTTON_GAP_PX = 8;
+/** @type {{ from: "agent" | "user", text: string }[]} */
+let composerQuotes = [];
+/** @type {{ from: "agent" | "user", text: string } | null} */
+let selectedQuote = null;
+let pointerSelecting = false;
+
+function setComposerQuotes(quotes) {
+  composerQuotes = quotes;
+  renderComposerQuotes();
+}
+
+function renderComposerQuotes() {
+  if (!chatQuotes) return;
+  chatQuotes.innerHTML = composerQuotes
+    .map(
+      (quote, index) =>
+        '<div class="chat-quote"><div class="chat-quote-text">' +
+        escapeHtml(quote.text) +
+        '</div><div class="chat-quote-foot"><span class="chat-quote-from">' +
+        (quote.from === "agent" ? "Agent" : "You") +
+        '</span><button class="chat-quote-remove" type="button" aria-label="Remove quote" data-index="' +
+        index +
+        '">' +
+        REMOVE_ICON_SVG +
+        "</button></div></div>",
+    )
+    .join("");
+  for (const button of chatQuotes.querySelectorAll(".chat-quote-remove")) {
+    const removeButton = /** @type {HTMLButtonElement} */ (button);
+    removeButton.disabled = ended || terminalSubmission !== null;
+    removeButton.addEventListener("click", () => {
+      const index = Number(removeButton.dataset.index);
+      setComposerQuotes(composerQuotes.filter((_, position) => position !== index));
+      chatInput.focus();
+    });
+  }
+}
+
+// 当前选区若完整落在一条对话记录消息内，返回 { quote, rect }；否则 null。rect 是选区在视口中的外框。
+function chatSelectionQuote() {
+  if (typeof document.getSelection !== "function") return null;
+  const selection = document.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  const bubbleOf = (node) => {
+    const element = node && node.nodeType === 1 ? node : node?.parentElement;
+    const bubble = element?.closest?.("[data-chat-role]");
+    return bubble && chatLog.contains(bubble) ? bubble : null;
+  };
+  const bubble = bubbleOf(range.startContainer);
+  if (!bubble || bubble !== bubbleOf(range.endContainer)) return null;
+  const text = selection.toString().trim();
+  if (!text) return null;
+  /** @type {"agent" | "user"} */
+  const from = bubble.getAttribute("data-chat-role") === "agent" ? "agent" : "user";
+  return { quote: { from, text }, rect: range.getBoundingClientRect() };
+}
+
+function hideQuoteButton() {
+  selectedQuote = null;
+  if (quoteButton) quoteButton.hidden = true;
+}
+
+function updateQuoteButton() {
+  if (!quoteButton) return;
+  const found = ended || terminalSubmission !== null || pointerSelecting ? null : chatSelectionQuote();
+  if (!found) {
+    hideQuoteButton();
+    return;
+  }
+  selectedQuote = found.quote;
+  quoteButton.hidden = false;
+  const { rect } = found;
+  const width = quoteButton.offsetWidth;
+  const height = quoteButton.offsetHeight;
+  const viewportWidth = Number(window.innerWidth) || 0;
+  const viewportHeight = Number(window.innerHeight) || 0;
+  const below = mediaMatches("(pointer: coarse)");
+  let top = below ? rect.bottom + QUOTE_BUTTON_GAP_PX : rect.top - height - QUOTE_BUTTON_GAP_PX;
+  // 放不下时换到另一侧，再夹回视口内。
+  if (!below && top < QUOTE_BUTTON_GAP_PX) top = rect.bottom + QUOTE_BUTTON_GAP_PX;
+  if (below && top + height > viewportHeight - QUOTE_BUTTON_GAP_PX) top = rect.top - height - QUOTE_BUTTON_GAP_PX;
+  top = Math.min(
+    Math.max(top, QUOTE_BUTTON_GAP_PX),
+    Math.max(QUOTE_BUTTON_GAP_PX, viewportHeight - height - QUOTE_BUTTON_GAP_PX),
+  );
+  const left = Math.min(
+    Math.max(rect.left, QUOTE_BUTTON_GAP_PX),
+    Math.max(QUOTE_BUTTON_GAP_PX, viewportWidth - width - QUOTE_BUTTON_GAP_PX),
+  );
+  quoteButton.style.top = top + "px";
+  quoteButton.style.left = left + "px";
+}
+
+function addSelectedQuote() {
+  if (!selectedQuote || ended || terminalSubmission !== null) return;
+  setComposerQuotes([...composerQuotes, selectedQuote]);
+  document.getSelection?.()?.removeAllRanges();
+  hideQuoteButton();
+  chatInput.focus();
+}
+
+if (quoteButton) {
+  // 按下按钮不能先清掉选区，否则 click 时已拿不到要引用的文字。
+  quoteButton.addEventListener("pointerdown", (event) => event.preventDefault());
+  quoteButton.addEventListener("mousedown", (event) => event.preventDefault());
+  quoteButton.addEventListener("click", addSelectedQuote);
+}
+document.addEventListener("selectionchange", updateQuoteButton);
+// 鼠标拖选过程中不显示按钮，松开后再出现，避免按钮跟着拖动闪烁；触屏靠系统选择手柄，不经过这里。
+document.addEventListener("pointerdown", (event) => {
+  if (
+    event.pointerType === "mouse" &&
+    event.target !== quoteButton &&
+    !quoteButton?.contains(/** @type {Node} */ (event.target))
+  ) {
+    pointerSelecting = true;
+    hideQuoteButton();
+  }
+});
+document.addEventListener("pointerup", () => {
+  if (!pointerSelecting) return;
+  pointerSelecting = false;
+  updateQuoteButton();
+});
+panelScroll.addEventListener("scroll", updateQuoteButton);
+window.addEventListener("resize", updateQuoteButton);
+
 function sendQueued(endAfter) {
   if (ended) return;
   if (terminalSubmission) {
@@ -2417,9 +2591,14 @@ function sendQueued(endAfter) {
   if (!chipsBlocked) {
     const text = chatInput.value.trim();
     const attachments = chatAttachmentController.collectReady();
-    if (text || attachments.length) {
+    const quotes = composerQuotes.slice();
+    if (text || attachments.length || quotes.length) {
       const prompt = { uid: "", prompt: text, selector: "", tag: "message", text: "Freeform message" };
       if (attachments.length) prompt.attachments = attachments;
+      if (quotes.length) {
+        prompt.text = CHAT_QUOTE_PROMPT_TEXT;
+        prompt.target = { type: CHAT_QUOTE_TARGET_TYPE, quotes };
+      }
       assignPromptIdentity(prompt, false);
       queued.push(prompt);
       persistQueuedPrompts();
@@ -2429,6 +2608,7 @@ function sendQueued(endAfter) {
       render();
       chatInput.value = "";
       chatAttachmentController.reset();
+      setComposerQuotes([]);
     }
   }
   const shouldEnd = Boolean(endAfter && !chipsBlocked);
