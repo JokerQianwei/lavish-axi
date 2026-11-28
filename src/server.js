@@ -3013,18 +3013,17 @@ export function extractArtifactHead(html) {
   return { faviconTag, title };
 }
 
+// 在样式表加载前确定主题，避免首帧闪烁。系统未声明浅色时保留原来的深色外观；
+// 存储键和解析规则须与 chrome-client.js 一致。
+const CHROME_THEME_BOOT_JS = `(function(){var t;try{t=localStorage.getItem("lavish-axi:theme");}catch(e){}
+if(t!=="light"&&t!=="dark")t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);})();`;
 // The chrome page ships with the layout-gate overlay already covering the artifact area. Install
 // its bounded escape and manual bypass inline before `chrome-client.js`, so they still work if the
 // shared server shuts down between serving the page and serving that script. This block also arms
 // the boot-failure card before the external script tag, surviving a request that hangs instead of
 // erroring; `chrome-client.js` cancels that boot timer once it has run to completion and reuses the
 // gate escape for every later overlay state.
-// 首帧前定主题，避免浅色系统先闪一帧深色：读 More 菜单存下的选择（lavish-axi:theme），没有选择
-// 时跟随系统 prefers-color-scheme，系统未声明浅色时保持原来的深色。chrome-client.js 的 resolvedTheme()
-// 用同一规则处理之后的切换与系统变化，两处须一致。
-const CHROME_THEME_BOOT_JS = `(function(){var t;try{t=localStorage.getItem("lavish-axi:theme");}catch(e){}
-if(t!=="light"&&t!=="dark")t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
-document.documentElement.setAttribute("data-theme",t);})();`;
 export const CHROME_BOOT_FAILSAFE_MS = 15000;
 export const CHROME_LAYOUT_GATE_MAX_HOLD_MS = 12000;
 // The failsafe's button is the only control on a page whose client script is dead, so its own

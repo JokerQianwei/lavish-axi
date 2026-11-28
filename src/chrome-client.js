@@ -1471,10 +1471,6 @@ function cycleLayoutPreference() {
 applyLayoutLock();
 
 // ---- Theme ----
-// 外壳的浅色/深色主题。偏好是 "system"（默认，跟随 prefers-color-scheme）、"light" 或 "dark"，
-// 存在本设备 localStorage；<html data-theme> 只取解析后的 "light"/"dark"，chrome.css 按它换语义变量。
-// 首帧的 data-theme 由 server.js 的 CHROME_THEME_BOOT_JS 按同一规则设定。批注卡在作品 iframe 里，
-// 通过 lavish:setTheme 跟随；方案正文不受影响。
 const THEME_STORAGE_KEY = "lavish-axi:theme";
 const SYSTEM_LIGHT_QUERY = "(prefers-color-scheme: light)";
 const themeToggle = /** @type {HTMLButtonElement | null} */ (document.getElementById("themeToggle"));
@@ -1490,13 +1486,12 @@ function readThemePreference() {
   }
 }
 
-// 系统没有声明浅色（含 no-preference）时保持深色，这是浅色主题出现前的外观。
+// 与 CHROME_THEME_BOOT_JS 保持一致，避免客户端接管时改变首帧主题。
 function resolvedTheme() {
   if (themePreference !== "system") return themePreference;
   return mediaMatches(SYSTEM_LIGHT_QUERY) ? "light" : "dark";
 }
 
-// 只更新外壳自身；作品 iframe 在加载时由 frame load 处理器取当前主题，切换时由 themeChanged() 通知。
 function applyTheme() {
   document.documentElement.setAttribute("data-theme", resolvedTheme());
   if (themeToggleText) {
@@ -1505,12 +1500,12 @@ function applyTheme() {
   }
 }
 
+// 切换时通知当前批注卡；新加载的 iframe 由 load 处理器单独同步。
 function themeChanged() {
   applyTheme();
   postToFrame({ type: "lavish:setTheme", theme: resolvedTheme() });
 }
 
-// System, then Light, then Dark, like the layout toggle. "system" clears the stored choice.
 function cycleThemePreference() {
   const order = ["system", "light", "dark"];
   themePreference = order[(order.indexOf(themePreference) + 1) % order.length];

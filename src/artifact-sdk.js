@@ -486,8 +486,7 @@ export function createArtifactSdk(
   // page it was made on, so while that element is still in the page, identity decides the match.
   const queuedAnchorElements = new Map();
   let shadow = null;
-  // 批注卡跟随外壳主题：外壳在作品加载和切换主题时发 lavish:setTheme；收到之前按系统外观先定，
-  // 规则与外壳一致（系统未声明浅色时用深色）。只作用于 shadow 内的 Lavish 控件，不碰作品样式。
+  // 批注卡可能早于父页面的 lavish:setTheme 挂载；先用当前媒体查询，收到后只更新批注卡的 shadow 宿主。
   let chromeTheme = window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
   let counter = 0;
   const ids = new WeakMap();

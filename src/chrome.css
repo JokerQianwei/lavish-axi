@@ -9,8 +9,6 @@
 }
 
 :root {
-  /* 默认深色主题。浅色值在下方 :root[data-theme="light"] 覆盖同名语义变量；data-theme 由页面头部的
-     启动脚本按 localStorage 选择或系统 prefers-color-scheme 设定，chrome-client.js 负责切换。 */
   --scheme: dark;
   /* 中性灰阶：纯灰无色偏，深色外壳 90% 的面积只用这一组。 */
   --gray-950: #111112;
@@ -117,8 +115,8 @@
   --annotate-outline: 2px solid var(--accent);
   --annotate-offset: 2px;
 }
-/* 浅色主题（qw-design）：白底、#F5F5F7 模块底色、#181818 主文字、#6A6A6A 次要文字、#0071E3 唯一强调色。
-   只覆盖语义变量，组件样式不分主题。文字色在白底和 #F5F5F7 上都不低于 4.5:1。 */
+/* 通过语义变量切换主题，不用旧版 Android 内嵌浏览器可能不支持的 light-dark()。
+   核对文字对比度时按控件实际合成的背景计算，包括半透明的警告标签和悬停底色。 */
 :root[data-theme="light"] {
   --scheme: light;
   --bg: #ffffff;
@@ -136,7 +134,7 @@
   --border-strong: #d2d2d7;
   --accent: #0071e3;
   --accent-hover: #005bb5;
-  /* #0071E3 在 #F5F5F7 上只有 4.2:1，作文字时用同色相加深一档。 */
+  /* 强调色在模块底色上达不到 4.5:1；文字用更深的值，为叠加底色留出余量。 */
   --accent-text: #005bb5;
   --accent-soft: rgba(0, 113, 227, 0.08);
   --accent-line: rgba(0, 113, 227, 0.4);
