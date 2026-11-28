@@ -697,6 +697,12 @@ body.lavish {
   cursor: pointer;
 }
 
+/* 图标只在窄屏紧凑形态出现，见文件末尾的窄屏顶栏规则。 */
+.revisions-button > svg {
+  display: none;
+  flex-shrink: 0;
+}
+
 .revisions-button:hover {
   background: var(--bg-hover);
   color: var(--fg);
@@ -1832,11 +1838,10 @@ iframe {
 body.layout-gate-active iframe#artifact {
   opacity: 0;
 }
-/* Narrow chrome: the drawer stops hanging off the button and spans the viewport instead, so the
-   list never overflows horizontally on a phone-width window. */
+/* 窄屏下，警告和修订抽屉不再与按钮右对齐，避免抽屉左侧超出视口。 */
 @media (max-width: 640px) {
   .bar {
-    /* 警告和修订同时显示时，给更多按钮留足空间。 */
+    /* 先缩减顶栏的间距，给 More 腾出空间。 */
     gap: 4px;
     --bar-pad: var(--space-6);
   }
@@ -1854,6 +1859,14 @@ body.layout-gate-active iframe#artifact {
     left: 12px;
     width: auto;
     max-height: min(calc(var(--layout-vh, 100vh) * 0.7), 460px);
+  }
+  /* 修订列表已单独限高并滚动，抽屉无需再限高。 */
+  .revisions-drawer {
+    position: fixed;
+    top: calc(var(--bar-h) + 8px);
+    right: 12px;
+    left: 12px;
+    width: auto;
   }
 }
 /* Phone-width chrome: the artifact takes the whole viewport above a persistent conversation dock,
@@ -2164,4 +2177,26 @@ body.layout-gate-active iframe#artifact {
 }
 .whiteboard-error[hidden] {
   display: none;
+}
+
+/* 窄屏顶栏不换行：底部会话面板和遮罩按 --bar-h 定位。压缩修订按钮，为两位数的警告计数留空间，
+   无障碍名称仍由 chrome-client.js 设置。两种按钮都出现且空间更紧时，只在视觉上隐藏
+   Annotate 文字，保留开关的可访问名称。与其他窄屏规则一样，显式 Desktop 布局不应用这些规则。 */
+@media (max-width: 430px) {
+  .revisions-button > svg {
+    display: block;
+  }
+  .revisions-button-text {
+    display: none;
+  }
+}
+@media (max-width: 374px) {
+  .bar:has(.warnings-wrap:not([hidden])):has(.revisions-wrap:not([hidden])) .annotate-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
 }
