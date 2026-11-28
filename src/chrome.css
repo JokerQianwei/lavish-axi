@@ -128,7 +128,7 @@
   --bg-hover: #ebebef;
   --fg: #181818;
   --fg-muted: #3a3a3c;
-  --fg-dim: #6a6a6a;
+  --fg-dim: #606060;
   --fg-faint: #6a6a6a;
   --fg-label: #6a6a6a;
   --border: #e5e5e7;
@@ -137,10 +137,10 @@
   --accent: #0071e3;
   --accent-hover: #005bb5;
   /* #0071E3 在 #F5F5F7 上只有 4.2:1，作文字时用同色相加深一档。 */
-  --accent-text: #0066cc;
+  --accent-text: #005bb5;
   --accent-soft: rgba(0, 113, 227, 0.08);
   --accent-line: rgba(0, 113, 227, 0.4);
-  --danger: #d70015;
+  --danger: #bc0012;
   --danger-soft: rgba(215, 0, 21, 0.08);
   --scrim: rgba(24, 24, 24, 0.32);
   --veil: rgba(255, 255, 255, 0.86);
@@ -602,6 +602,9 @@ body.lavish {
   display: none;
 }
 .more-menu {
+  max-height: calc(100vh - var(--bar-h));
+  max-height: calc(100dvh - var(--bar-h));
+  overflow-y: auto;
   right: 0;
   top: 40px;
   width: min(300px, calc(100vw - 24px));
@@ -2145,7 +2148,7 @@ body.layout-gate-active iframe#artifact {
     box-shadow: 0 0 0 0 var(--accent-line);
   }
   100% {
-    box-shadow: 0 0 0 10px rgba(0, 113, 227, 0);
+    box-shadow: 0 0 0 10px color-mix(in srgb, var(--accent) 0%, transparent);
   }
 }
 
