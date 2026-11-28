@@ -47,6 +47,7 @@ async function chromeCssSource() {
 
 function normalizeCssForAssertions(css) {
   return css
+    .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/\s*([{}:;,])\s*/g, "$1")
     .replace(/\s+/g, " ")
     .replace(/0\./g, ".");
