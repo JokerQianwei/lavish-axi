@@ -549,6 +549,7 @@ async function createChromeHarness({
     },
     window: {
       innerWidth: viewportWidth,
+      innerHeight: 900,
       clearTimeout: fakeClearTimeout,
       setTimeout: fakeSetTimeout,
       addEventListener(type, handler) {
@@ -10150,6 +10151,9 @@ test("the theme toggle still works when the browser refuses localStorage", async
 
 async function chromeWithTranscript(options = {}) {
   const chrome = await createChromeHarness(options);
+  Object.assign(chrome.element("panelScroll"), {
+    getBoundingClientRect: () => ({ top: 40, bottom: 800, left: 80, right: 1000 }),
+  });
   chrome.eventSource().listeners.get("chat-sync")({
     data: JSON.stringify({
       chat: [
@@ -10300,6 +10304,44 @@ test("a zoomed phone flips and clamps Quote inside the visual viewport", async (
   chrome.selectChatText(agentBubble, "five", { left: 620, right: 650, top: 540, bottom: 580 });
   assert.equal(button.style.top, "238px");
   assert.equal(button.style.left, "262px");
+});
+
+test("artifact focus dismisses the quote even after another scroll", async () => {
+  const { chrome, agentBubble } = await chromeWithTranscript();
+  chrome.selectChatText(agentBubble, "five batches");
+  const button = chrome.element("quoteButton");
+  assert.equal(button.hidden, false);
+  chrome.element("artifact").focus();
+  chrome.element("artifact").dispatch("focus", {});
+  chrome.element("panelScroll").dispatch("scroll", {});
+  assert.equal(button.hidden, true);
+  button.click();
+  assert.equal(chrome.element("chatQuotes").innerHTML || "", "");
+});
+
+test("Quote follows the visible intersection on viewport and panel changes", async () => {
+  const viewport = Object.assign(new EventTarget(), { offsetLeft: 0, offsetTop: 0, width: 800, height: 700 });
+  const { chrome, agentBubble } = await chromeWithTranscript({
+    device: { ...DESKTOP_SITE_PHONE, innerWidth: 800, visualViewport: viewport },
+  });
+  const rect = { top: 300, bottom: 320, left: 100, right: 260 };
+  const button = chrome.element("quoteButton");
+  button.offsetWidth = 60;
+  button.offsetHeight = 24;
+  chrome.selectChatText(agentBubble, "five batches", rect);
+  assert.equal(button.style.top, "328px");
+  viewport.height = 330;
+  viewport.dispatchEvent(new Event("resize"));
+  assert.equal(button.style.top, "268px");
+  viewport.offsetLeft = 260;
+  viewport.dispatchEvent(new Event("scroll"));
+  assert.equal(button.hidden, true);
+  viewport.offsetLeft = 0;
+  viewport.dispatchEvent(new Event("scroll"));
+  assert.equal(button.hidden, false);
+  Object.assign(rect, { top: 15, bottom: 35 });
+  chrome.element("panelScroll").dispatch("scroll", {});
+  assert.equal(button.hidden, true);
 });
 
 test("a quote-only draft holds back a restart reload", async () => {

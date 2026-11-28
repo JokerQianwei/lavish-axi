@@ -1775,6 +1775,8 @@ if (sheetMedia && typeof sheetMedia.addEventListener === "function") {
 if (window.visualViewport && typeof window.visualViewport.addEventListener === "function") {
   window.visualViewport.addEventListener("resize", syncVisualViewport);
   window.visualViewport.addEventListener("scroll", syncVisualViewport);
+  window.visualViewport.addEventListener("resize", updateQuoteButton);
+  window.visualViewport.addEventListener("scroll", updateQuoteButton);
 }
 window.addEventListener("resize", syncVisualViewport);
 syncVisualViewport();
@@ -2512,25 +2514,37 @@ function updateQuoteButton() {
     hideQuoteButton();
     return;
   }
+  const { rect } = found;
+  const viewport = window.visualViewport;
+  const x = viewport?.offsetLeft || 0;
+  const y = viewport?.offsetTop || 0;
+  const viewportWidth = viewport?.width ?? window.innerWidth;
+  const viewportHeight = viewport?.height ?? window.innerHeight;
+  const panelRect = panelScroll.getBoundingClientRect();
+  const left = Math.max(rect.left, panelRect.left, x);
+  const topEdge = Math.max(rect.top, panelRect.top, y);
+  const bottom = Math.min(rect.bottom, panelRect.bottom, y + viewportHeight);
+  if (topEdge >= bottom || left >= Math.min(rect.right, panelRect.right, x + viewportWidth)) {
+    hideQuoteButton();
+    return;
+  }
   selectedQuote = found.quote;
   quoteButton.hidden = false;
-  const { rect } = found;
   const width = quoteButton.offsetWidth;
   const height = quoteButton.offsetHeight;
-  const viewport = window.visualViewport;
-  const minX = (viewport?.offsetLeft || 0) / layoutZoom + QUOTE_BUTTON_GAP_PX;
-  const minY = (viewport?.offsetTop || 0) / layoutZoom + QUOTE_BUTTON_GAP_PX;
-  const maxX = minX + (viewport?.width ?? window.innerWidth) / layoutZoom - 2 * QUOTE_BUTTON_GAP_PX - width;
-  const maxY = minY + (viewport?.height ?? window.innerHeight) / layoutZoom - 2 * QUOTE_BUTTON_GAP_PX - height;
-  const aboveTop = rect.top / layoutZoom - height - QUOTE_BUTTON_GAP_PX;
-  const belowTop = rect.bottom / layoutZoom + QUOTE_BUTTON_GAP_PX;
+  const minX = x / layoutZoom + QUOTE_BUTTON_GAP_PX;
+  const minY = y / layoutZoom + QUOTE_BUTTON_GAP_PX;
+  const maxX = minX + viewportWidth / layoutZoom - 2 * QUOTE_BUTTON_GAP_PX - width;
+  const maxY = minY + viewportHeight / layoutZoom - 2 * QUOTE_BUTTON_GAP_PX - height;
+  const aboveTop = topEdge / layoutZoom - height - QUOTE_BUTTON_GAP_PX;
+  const belowTop = bottom / layoutZoom + QUOTE_BUTTON_GAP_PX;
   const below = mediaMatches("(pointer: coarse)");
   let top = below ? belowTop : aboveTop;
   // 放不下时换到另一侧，再夹回视口内。
   if (!below && top < minY) top = belowTop;
   if (below && top > maxY) top = aboveTop;
   quoteButton.style.top = Math.max(minY, Math.min(top, maxY)) + "px";
-  quoteButton.style.left = Math.max(minX, Math.min(rect.left / layoutZoom, maxX)) + "px";
+  quoteButton.style.left = Math.max(minX, Math.min(left / layoutZoom, maxX)) + "px";
 }
 
 function addSelectedQuote() {
@@ -2548,6 +2562,13 @@ if (quoteButton) {
   quoteButton.addEventListener("click", addSelectedQuote);
 }
 document.addEventListener("selectionchange", updateQuoteButton);
+function dismissArtifactFocusQuote() {
+  if (document.activeElement !== frame) return;
+  if (chatSelectionQuote()) document.getSelection()?.removeAllRanges();
+  hideQuoteButton();
+}
+frame.addEventListener("focus", dismissArtifactFocusQuote);
+window.addEventListener("blur", () => setTimeout(dismissArtifactFocusQuote, 0));
 // 鼠标拖选过程中不显示按钮，松开后再出现，避免按钮跟着拖动闪烁；触屏靠系统选择手柄，不经过这里。
 document.addEventListener("pointerdown", (event) => {
   if (
