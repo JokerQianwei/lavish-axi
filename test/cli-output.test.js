@@ -2040,6 +2040,37 @@ test("image-attachment feedback tells agents to open the local image paths", () 
   assert.match(output.next_step, /absolute local `path`/);
 });
 
+test("feedback quoting the chat history tells the agent where the quoted passages are", () => {
+  const quoted = createPollOutput({
+    file: "/tmp/report.html",
+    response: {
+      status: "feedback",
+      dom_snapshot: "",
+      prompts: [
+        {
+          uid: "",
+          prompt: "Why?",
+          selector: "",
+          tag: "message",
+          text: "The user quoted earlier messages from this conversation",
+          target: { type: "chat-quote", quotes: [{ from: "agent", text: "Ship in five batches." }] },
+        },
+      ],
+    },
+  });
+  assert.match(quoted.next_step, /quote earlier messages from this Lavish conversation/);
+  assert.match(quoted.next_step, /target\.quotes/);
+  const plain = createPollOutput({
+    file: "/tmp/report.html",
+    response: {
+      status: "feedback",
+      dom_snapshot: "",
+      prompts: [{ uid: "", prompt: "Hi", selector: "", tag: "message", text: "Freeform message" }],
+    },
+  });
+  assert.doesNotMatch(plain.next_step, /target\.quotes/);
+});
+
 test("feedback without attachments does not mention image attachments", () => {
   const output = createPollOutput({
     file: "/tmp/report.html",

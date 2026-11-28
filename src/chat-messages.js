@@ -499,6 +499,36 @@ function bound(value, max) {
   return text.slice(0, max - 1) + "…";
 }
 
+export const CHAT_QUOTE_TARGET_TYPE = "chat-quote";
+
+/**
+ * 校验客户端提交的引用；没有有效引用时返回 null，消息不带 target。
+ * 只用 trim 判空，不修改选中的原文；截断只用于对话记录的摘录。
+ */
+export function normalizeChatQuoteTarget(target) {
+  const quotes = (Array.isArray(target?.quotes) ? target.quotes : [])
+    .filter(
+      (quote) =>
+        quote &&
+        typeof quote === "object" &&
+        (quote.from === "agent" || quote.from === "user") &&
+        typeof quote.text === "string" &&
+        quote.text.trim(),
+    )
+    .map((quote) => ({ from: quote.from, text: quote.text }));
+  return quotes.length ? { type: CHAT_QUOTE_TARGET_TYPE, quotes } : null;
+}
+
+// 对话记录里显示的引用摘录。chrome-client.js 的 promptQuotes 用同一规则显示排队中的消息，
+// 两处由 test/chrome-client-queue.test.js 固定为一致，消息送达前后显示不变。
+function promptQuotes(prompt) {
+  const target = prompt.target && typeof prompt.target === "object" ? prompt.target : null;
+  if (target?.type !== CHAT_QUOTE_TARGET_TYPE || !Array.isArray(target.quotes)) return [];
+  return target.quotes
+    .map((quote) => ({ from: quote?.from === "agent" ? "agent" : "user", excerpt: bound(quote?.text, EXCERPT_MAX) }))
+    .filter((quote) => quote.excerpt);
+}
+
 function withSelector(anchor, selector) {
   if (selector) anchor.selector = selector;
   return anchor;
@@ -553,8 +583,8 @@ function promptAnchor(prompt, kind) {
 // What an accepted prompt becomes in `session.chat`. Every kind of prompt enters the transcript,
 // so the conversation shows what the reviewer said and not only what the agent answered. Only the
 // client-visible attachment fields are kept: the resolved path, mime, and size stay in the prompt.
-// An accepted prompt keeps its identity even when its only displayable content is an anchor, so
-// the transcript remains the authoritative acknowledgement source after a lost response.
+// An accepted prompt keeps its identity even without message text, so the transcript remains
+// the authoritative acknowledgement source after a lost response.
 export function chatEntryForPrompt(prompt, at) {
   if (!prompt || typeof prompt !== "object") return null;
   const text = String(prompt.prompt || "");
@@ -578,10 +608,12 @@ export function chatEntryForPrompt(prompt, at) {
           : "annotation";
   const promptId = normalizePromptId(prompt.prompt_id);
   const anchor = promptAnchor(prompt, kind);
-  if (!text && attachments.length === 0 && !promptId && !anchor) return null;
+  const quotes = promptQuotes(prompt);
+  if (!text && attachments.length === 0 && !promptId && !anchor && quotes.length === 0) return null;
   const entry = { role: "user", kind, text, at: String(at || new Date().toISOString()) };
   if (promptId) entry.prompt_id = promptId;
   if (anchor) entry.anchor = anchor;
+  if (quotes.length) entry.quotes = quotes;
   if (attachments.length) entry.attachments = attachments;
   return entry;
 }

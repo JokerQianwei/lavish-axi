@@ -112,6 +112,15 @@ const chatComposer = /** @type {HTMLDivElement} */ (document.getElementById("cha
 const chatInput = /** @type {HTMLTextAreaElement} */ (document.getElementById("chatInput"));
 const chatAttachments = /** @type {HTMLDivElement} */ (document.getElementById("chatAttachments"));
 const chatAttachButton = /** @type {HTMLButtonElement} */ (document.getElementById("chatAttach"));
+const chatQuotes = /** @type {HTMLDivElement} */ (document.getElementById("chatQuotes"));
+const quoteButton = /** @type {HTMLButtonElement} */ (document.getElementById("quoteButton"));
+// 引用状态在这里声明而不是放在「Chat quotes」一节：面板收起逻辑（applySheetState 等）在启动时就会
+// 运行并撤下引用按钮，必须先于那一节可用。
+/** @type {{ from: "agent" | "user", text: string }[]} */
+let composerQuotes = [];
+/** @type {{ from: "agent" | "user", text: string } | null} */
+let selectedQuote = null;
+let pointerSelecting = false;
 const chatAttachInput = /** @type {HTMLInputElement} */ (document.getElementById("chatAttachInput"));
 const chatAttachmentNotice = /** @type {HTMLSpanElement} */ (document.getElementById("chatAttachmentNotice"));
 const panel = /** @type {HTMLElement} */ (document.getElementById("panel"));
@@ -503,6 +512,9 @@ const EDIT_ICON_SVG =
 const ANCHOR_EXCERPT_MAX = 120;
 const ANCHOR_SELECTOR_MAX = 512;
 const ANCHOR_LABEL_MAX = 40;
+const CHAT_QUOTE_TARGET_TYPE = "chat-quote";
+// 引用消息自带的说明，agent 和转发 poll 输出的上层（如去掉 next_step 的机器人）都能直接读到。
+const CHAT_QUOTE_PROMPT_TEXT = "The user quoted earlier messages from this conversation";
 
 function boundAnchorText(value, max) {
   const text = String(value || "")
@@ -565,6 +577,32 @@ function promptAnchor(prompt) {
   });
 }
 
+// 本文件不能 import；摘录规则见 src/chat-messages.js 的 promptQuotes。
+function promptQuotes(prompt) {
+  const target = prompt?.target && typeof prompt.target === "object" ? prompt.target : null;
+  if (target?.type !== CHAT_QUOTE_TARGET_TYPE || !Array.isArray(target.quotes)) return [];
+  return target.quotes
+    .map((quote) => ({
+      from: quote?.from === "agent" ? "agent" : "user",
+      excerpt: boundAnchorText(quote?.text, ANCHOR_EXCERPT_MAX),
+    }))
+    .filter((quote) => quote.excerpt);
+}
+
+function quotesHtml(quotes) {
+  if (!Array.isArray(quotes)) return "";
+  return quotes
+    .map(
+      (quote) =>
+        '<div class="anchor quote" title="' +
+        escapeHtml((quote.from === "agent" ? "Quoted from the agent: " : "Quoted from you: ") + quote.excerpt) +
+        '"><span class="anchor-kind">quote</span><span class="anchor-excerpt">\u201C' +
+        escapeHtml(quote.excerpt) +
+        "\u201D</span></div>",
+    )
+    .join("");
+}
+
 // The anchor line: a mono chip naming the kind (`<h2>`, `text`, `cell`, ...) and a quoted
 // excerpt, with the full excerpt and selector on hover.
 function anchorHtml(anchor) {
@@ -621,6 +659,7 @@ function queuedBubbleHtml(prompt, index) {
     REMOVE_ICON_SVG +
     "</button></small>" +
     anchorHtml(promptAnchor(prompt)) +
+    quotesHtml(promptQuotes(prompt)) +
     userBubbleTextHtml(prompt, prompt.prompt) +
     bubbleAttachmentsHtml(prompt) +
     "</div>"
@@ -635,6 +674,7 @@ function queuedEditorHtml(prompt, index) {
     index +
     '"><small>Editing</small>' +
     anchorHtml(promptAnchor(prompt)) +
+    quotesHtml(promptQuotes(prompt)) +
     '<textarea class="queued-edit-input" aria-label="Edit queued prompt" data-index="' +
     index +
     '">' +
@@ -918,6 +958,7 @@ function chatBubbleHtml(entry) {
   return (
     "<small>You</small>" +
     anchorHtml(entry.anchor) +
+    quotesHtml(entry.quotes) +
     userBubbleTextHtml(entry, entry.text) +
     bubbleAttachmentsHtml(entry) +
     receiptHtml(entry)
@@ -992,10 +1033,13 @@ function addChat(entry, shouldScroll = true) {
   if (!entry || typeof entry !== "object") return;
   const role = entry.role === "agent" ? "agent" : "user";
   const text = String(entry.text || "");
-  if (!text && !(role === "agent" ? entry.html : attachmentCount(entry) || entry.anchor)) return;
+  const quoted = Array.isArray(entry.quotes) && entry.quotes.length > 0;
+  if (!text && !(role === "agent" ? entry.html : attachmentCount(entry) || entry.anchor || quoted)) return;
 
   const el = document.createElement("div");
   el.className = "bubble " + role;
+  // 只有对话记录里的消息可以被引用（不含排队气泡、工作中提示与退役草稿），说话方取自这里。
+  el.setAttribute("data-chat-role", role);
   el.innerHTML = chatBubbleHtml({ ...entry, role, text });
   chatLog.appendChild(el);
   if (shouldScroll) scrollElementIntoView(el);
@@ -1008,6 +1052,7 @@ function chatEntryDisplayKey(entry) {
     kind: entry?.kind,
     text: String(entry?.text || ""),
     anchor: entry?.anchor,
+    quotes: entry?.quotes,
     attachments: Array.isArray(entry?.attachments) ? entry.attachments.map((item) => String(item?.id || "")) : [],
   });
 }
@@ -1203,7 +1248,7 @@ function setReviewState(state) {
 }
 
 function hasUnsentDraft() {
-  if (editingPromptId) return true;
+  if (editingPromptId || composerQuotes.length) return true;
   return Boolean(lastReviewState && lastReviewState.card && String(lastReviewState.card.text || "").trim());
 }
 
@@ -1593,6 +1638,7 @@ function applySheetState() {
   panelToggle.setAttribute("aria-expanded", open ? "true" : "false");
   panelToggle.setAttribute("aria-label", open ? "Hide conversation" : "Show conversation");
   renderSheetSummary();
+  dismissQuoteForHiddenConversation();
 }
 
 // What the closed dock says. One line, most actionable state first: work the user has queued,
@@ -1735,6 +1781,8 @@ if (sheetMedia && typeof sheetMedia.addEventListener === "function") {
 if (window.visualViewport && typeof window.visualViewport.addEventListener === "function") {
   window.visualViewport.addEventListener("resize", syncVisualViewport);
   window.visualViewport.addEventListener("scroll", syncVisualViewport);
+  window.visualViewport.addEventListener("resize", updateQuoteButton);
+  window.visualViewport.addEventListener("scroll", updateQuoteButton);
 }
 window.addEventListener("resize", syncVisualViewport);
 syncVisualViewport();
@@ -1787,6 +1835,7 @@ function applyPanelCollapsed() {
   if (collapsed && activeElement && panel.contains(activeElement)) sidebarToggle.focus();
   sidebarToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
   renderSidebarToggle();
+  dismissQuoteForHiddenConversation();
 }
 
 // While collapsed the toggle stands in for the panel: it counts queued notes (the thing still to
@@ -1974,7 +2023,7 @@ function commitQueuedEdit() {
   endQueuedEdit();
   const prompt = queued[index];
   if (!isPromptEditable(prompt)) return false;
-  if (!text && !attachmentCount(prompt)) {
+  if (!text && !attachmentCount(prompt) && !promptQuotes(prompt).length) {
     queued.splice(index, 1);
     afterQueuedPromptRemoved();
   } else {
@@ -2396,6 +2445,169 @@ function createChatAttachmentsController() {
 
 const chatAttachmentController = createChatAttachmentsController();
 
+// ---- Chat quotes ----
+const QUOTE_BUTTON_GAP_PX = 8;
+
+function setComposerQuotes(quotes) {
+  composerQuotes = quotes;
+  renderComposerQuotes();
+}
+
+function renderComposerQuotes() {
+  if (!chatQuotes) return;
+  chatQuotes.innerHTML = composerQuotes
+    .map(
+      (quote, index) =>
+        '<div class="chat-quote"><div class="chat-quote-text">' +
+        escapeHtml(quote.text) +
+        '</div><div class="chat-quote-foot"><span class="chat-quote-from">' +
+        (quote.from === "agent" ? "Agent" : "You") +
+        '</span><button class="chat-quote-remove" type="button" aria-label="Remove quote" data-index="' +
+        index +
+        '">' +
+        REMOVE_ICON_SVG +
+        "</button></div></div>",
+    )
+    .join("");
+  for (const button of chatQuotes.querySelectorAll(".chat-quote-remove")) {
+    const removeButton = /** @type {HTMLButtonElement} */ (button);
+    removeButton.disabled = ended || terminalSubmission !== null;
+    removeButton.addEventListener("click", () => {
+      const index = Number(removeButton.dataset.index);
+      setComposerQuotes(composerQuotes.filter((_, position) => position !== index));
+      chatInput.focus();
+    });
+  }
+}
+
+// 只接受同一条消息内的单个选区，避免把不同作者的文字合成一条引用；不满足条件时返回 null。
+// 返回的 rect 是选区在视口中的外框。
+function chatSelectionQuote() {
+  if (typeof document.getSelection !== "function") return null;
+  const selection = document.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount !== 1) return null;
+  const range = selection.getRangeAt(0);
+  const bubbleOf = (node) => {
+    const element = node && node.nodeType === 1 ? node : node?.parentElement;
+    const bubble = element?.closest?.("[data-chat-role]");
+    return bubble && chatLog.contains(bubble) ? bubble : null;
+  };
+  const bubble = bubbleOf(range.startContainer);
+  if (!bubble || bubble !== bubbleOf(range.endContainer)) return null;
+  const text = selection.toString();
+  if (!text.trim()) return null;
+  /** @type {"agent" | "user"} */
+  const from = bubble.getAttribute("data-chat-role") === "agent" ? "agent" : "user";
+  return { quote: { from, text }, rect: range.getBoundingClientRect() };
+}
+
+function hideQuoteButton() {
+  selectedQuote = null;
+  if (quoteButton) quoteButton.hidden = true;
+}
+
+// 聊天面板被收起（手机底部面板放下、桌面侧栏折叠）时，选区已经看不见：撤下按钮并丢弃聊天里的
+// 待引用选区，已加入输入框的卡片不受影响。返回面板是否收起。
+function dismissQuoteForHiddenConversation() {
+  if (!isConversationHidden()) return false;
+  const selection = document.getSelection?.();
+  if (selection) {
+    // 隐藏后选区文本可能为空，但 Range 仍会在面板重新展开时恢复高亮。
+    for (let i = 0; i < selection.rangeCount; i++) {
+      const { startContainer, endContainer } = selection.getRangeAt(i);
+      if (chatLog.contains(startContainer) || chatLog.contains(endContainer)) {
+        selection.removeAllRanges();
+        break;
+      }
+    }
+  }
+  hideQuoteButton();
+  return true;
+}
+
+function updateQuoteButton() {
+  if (!quoteButton) return;
+  if (dismissQuoteForHiddenConversation()) return;
+  const found = ended || terminalSubmission !== null || pointerSelecting ? null : chatSelectionQuote();
+  if (!found) {
+    hideQuoteButton();
+    return;
+  }
+  const { rect } = found;
+  const viewport = window.visualViewport;
+  const x = viewport?.offsetLeft || 0;
+  const y = viewport?.offsetTop || 0;
+  const viewportWidth = viewport?.width ?? window.innerWidth;
+  const viewportHeight = viewport?.height ?? window.innerHeight;
+  const panelRect = panelScroll.getBoundingClientRect();
+  const left = Math.max(rect.left, panelRect.left, x);
+  const topEdge = Math.max(rect.top, panelRect.top, y);
+  const bottom = Math.min(rect.bottom, panelRect.bottom, y + viewportHeight);
+  if (topEdge >= bottom || left >= Math.min(rect.right, panelRect.right, x + viewportWidth)) {
+    hideQuoteButton();
+    return;
+  }
+  selectedQuote = found.quote;
+  quoteButton.hidden = false;
+  const width = quoteButton.offsetWidth;
+  const height = quoteButton.offsetHeight;
+  const minX = x / layoutZoom + QUOTE_BUTTON_GAP_PX;
+  const minY = y / layoutZoom + QUOTE_BUTTON_GAP_PX;
+  const maxX = minX + viewportWidth / layoutZoom - 2 * QUOTE_BUTTON_GAP_PX - width;
+  const maxY = minY + viewportHeight / layoutZoom - 2 * QUOTE_BUTTON_GAP_PX - height;
+  const aboveTop = topEdge / layoutZoom - height - QUOTE_BUTTON_GAP_PX;
+  const belowTop = bottom / layoutZoom + QUOTE_BUTTON_GAP_PX;
+  // 触屏优先放下方，给通常出现在选区上方的系统菜单留空间。
+  const below = mediaMatches("(pointer: coarse)");
+  let top = below ? belowTop : aboveTop;
+  // 放不下时换到另一侧，再夹回视口内。
+  if (!below && top < minY) top = belowTop;
+  if (below && top > maxY) top = aboveTop;
+  quoteButton.style.top = Math.max(minY, Math.min(top, maxY)) + "px";
+  quoteButton.style.left = Math.max(minX, Math.min(left / layoutZoom, maxX)) + "px";
+}
+
+function addSelectedQuote() {
+  if (!selectedQuote || ended || terminalSubmission !== null) return;
+  setComposerQuotes([...composerQuotes, selectedQuote]);
+  document.getSelection?.()?.removeAllRanges();
+  hideQuoteButton();
+  chatInput.focus();
+}
+
+if (quoteButton) {
+  // 按下按钮不能先清掉选区，否则 click 时已拿不到要引用的文字。
+  quoteButton.addEventListener("pointerdown", (event) => event.preventDefault());
+  quoteButton.addEventListener("mousedown", (event) => event.preventDefault());
+  quoteButton.addEventListener("click", addSelectedQuote);
+}
+document.addEventListener("selectionchange", updateQuoteButton);
+function dismissArtifactFocusQuote() {
+  if (document.activeElement !== frame) return;
+  if (chatSelectionQuote()) document.getSelection()?.removeAllRanges();
+  hideQuoteButton();
+}
+frame.addEventListener("focus", dismissArtifactFocusQuote);
+window.addEventListener("blur", () => setTimeout(dismissArtifactFocusQuote, 0));
+// 鼠标拖选过程中不显示按钮，松开后再出现，避免按钮跟着拖动闪烁；触屏靠系统选择手柄，不经过这里。
+document.addEventListener("pointerdown", (event) => {
+  if (
+    event.pointerType === "mouse" &&
+    event.target !== quoteButton &&
+    !quoteButton?.contains(/** @type {Node} */ (event.target))
+  ) {
+    pointerSelecting = true;
+    hideQuoteButton();
+  }
+});
+document.addEventListener("pointerup", () => {
+  if (!pointerSelecting) return;
+  pointerSelecting = false;
+  updateQuoteButton();
+});
+panelScroll.addEventListener("scroll", updateQuoteButton);
+window.addEventListener("resize", updateQuoteButton);
+
 function sendQueued(endAfter) {
   if (ended) return;
   if (terminalSubmission) {
@@ -2417,9 +2629,14 @@ function sendQueued(endAfter) {
   if (!chipsBlocked) {
     const text = chatInput.value.trim();
     const attachments = chatAttachmentController.collectReady();
-    if (text || attachments.length) {
+    const quotes = composerQuotes.slice();
+    if (text || attachments.length || quotes.length) {
       const prompt = { uid: "", prompt: text, selector: "", tag: "message", text: "Freeform message" };
       if (attachments.length) prompt.attachments = attachments;
+      if (quotes.length) {
+        prompt.text = CHAT_QUOTE_PROMPT_TEXT;
+        prompt.target = { type: CHAT_QUOTE_TARGET_TYPE, quotes };
+      }
       assignPromptIdentity(prompt, false);
       queued.push(prompt);
       persistQueuedPrompts();
@@ -2429,6 +2646,7 @@ function sendQueued(endAfter) {
       render();
       chatInput.value = "";
       chatAttachmentController.reset();
+      setComposerQuotes([]);
     }
   }
   const shouldEnd = Boolean(endAfter && !chipsBlocked);
@@ -4621,9 +4839,7 @@ async function reloadChromeAfterServerRestart(reason = "") {
     return;
   }
 
-  // Unsent annotation text is the user's writing. A reload replays it, but it is still their
-  // call when to interrupt the card they are typing into, so offer the reload instead of taking
-  // it. The same applies to a page the user is only reading: the banner never reloads by itself.
+  // 即使草稿能恢复，也不能自动打断编辑；输入框里的引用卡片还会随页面重载丢失。
   if (hasUnsentDraft()) {
     chromeRestartReloadPromise = null;
     // The line this page shows comes from the same reason its siblings were sent. An event that
@@ -4768,6 +4984,7 @@ window.addEventListener("message", (event) => {
     postToFrame({ type: "lavish:setAnnotationMode", enabled: annotation && !ended });
   }
   if (msg.type === "lavish:queuePrompt") {
+    if (msg.prompt?.target?.type === CHAT_QUOTE_TARGET_TYPE) delete msg.prompt.target;
     enqueuePrompt(msg.prompt);
     // Queued from inside the artifact, where the closed dock is the only sign it landed.
     pulseSheetDock();

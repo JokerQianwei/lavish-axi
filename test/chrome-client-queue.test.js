@@ -231,6 +231,13 @@ async function createChromeHarness({
         if (handler) handler(event);
       },
       querySelectorAll(selector) {
+        if (id === "chatQuotes" && selector === ".chat-quote-remove") {
+          return [...this.innerHTML.matchAll(/class="chat-quote-remove"[^>]*data-index="(\d+)"/g)].map((match) => {
+            const remove = element(`chat-quote-remove-${match[1]}`);
+            remove.dataset.index = match[1];
+            return remove;
+          });
+        }
         if (id === "queuedLog" && selector === ".queued-remove") {
           return [...this.innerHTML.matchAll(/class="queued-remove"[^>]*data-index="(\d+)"/g)].map((match) => {
             const close = element(`queued-remove-${match[1]}`);
@@ -493,9 +500,19 @@ async function createChromeHarness({
       createElement(tag) {
         const el = element(`${tag}-${elements.size}`);
         el.tagName = tag.toUpperCase();
+        el.nodeType = 1;
         el.attrs = {};
         el.setAttribute = (name, value) => (el.attrs[name] = String(value));
         el.getAttribute = (name) => (name in el.attrs ? el.attrs[name] : null);
+        // Attribute selectors only (`[data-chat-role]`): enough for the chat-quote selection lookup.
+        el.closest = (selector) => {
+          const attribute = /^\[([\w-]+)\]$/.exec(selector)?.[1];
+          for (let current = el; current && attribute; current = current.parentElement) {
+            if (current.getAttribute?.(attribute) !== null && current.getAttribute?.(attribute) !== undefined)
+              return current;
+          }
+          return null;
+        };
         el.replaceWith = (next) => {
           if (tabIcon === el) tabIcon = next;
         };
@@ -532,6 +549,7 @@ async function createChromeHarness({
     },
     window: {
       innerWidth: viewportWidth,
+      innerHeight: 900,
       clearTimeout: fakeClearTimeout,
       setTimeout: fakeSetTimeout,
       addEventListener(type, handler) {
@@ -568,6 +586,7 @@ async function createChromeHarness({
     context.window.screen = device.screen;
     context.window.innerWidth = device.innerWidth;
     context.window.innerHeight = device.innerHeight;
+    Object.assign(context.window, { visualViewport: device.visualViewport });
     context.location.search = device.search || "";
     context.location.pathname = "/session/abc";
     context.location.hash = "#top";
@@ -736,6 +755,31 @@ async function createChromeHarness({
       };
       for (const { handler } of handlers) handler(event);
       return event;
+    },
+    selectionRangeCount() {
+      return context.document.getSelection?.()?.rangeCount ?? 0;
+    },
+    // 模拟用户选取文字；收起的聊天区不返回可见文本，但浏览器仍可能保留 Range。
+    selectChatText(node, text, rect = { top: 300, bottom: 320, left: 100, right: 260 }, ranges = text ? 1 : 0) {
+      context.document.getSelection = () => ({
+        get isCollapsed() {
+          return ranges === 0;
+        },
+        get rangeCount() {
+          return ranges;
+        },
+        getRangeAt: () => ({ startContainer: node, endContainer: node, getBoundingClientRect: () => rect }),
+        toString: () => {
+          const hiddenChat =
+            element("chatLog").contains(node) &&
+            (element("panelScroll").inert || element("body").classList.contains("panel-collapsed"));
+          return ranges && !hiddenChat ? text : "";
+        },
+        removeAllRanges() {
+          ranges = 0;
+        },
+      });
+      for (const { handler } of documentListeners.get("selectionchange") || []) handler({});
     },
     dispatchDocumentEvent(type, eventProps = {}) {
       const event = {
@@ -10106,4 +10150,263 @@ test("the theme toggle still works when the browser refuses localStorage", async
 
   chrome.element("themeToggle").click();
   assert.equal(rootTheme(chrome), "light");
+});
+
+// ---- Chat quotes ----
+// 引用聊天记录的契约（来自需求）：只有对话记录里的消息能引用；选中后出现 Quote 按钮，点击后输入框上方
+// 出现引用卡片，可多段、可移除、可不写文字直接发送；发出的消息带完整原文和说话方，历史里显示引用。
+
+async function chromeWithTranscript(options = {}) {
+  const chrome = await createChromeHarness(options);
+  Object.assign(chrome.element("panelScroll"), {
+    getBoundingClientRect: () => ({ top: 40, bottom: 800, left: 80, right: 1000 }),
+  });
+  chrome.eventSource().listeners.get("chat-sync")({
+    data: JSON.stringify({
+      chat: [
+        { role: "agent", text: "Agent plan: ship in five batches, one hour apart." },
+        { role: "user", kind: "message", text: "Can batch two move earlier?" },
+      ],
+    }),
+  });
+  await flushPromises();
+  const bubbles = chrome.element("chatLog").children.filter((child) => child.getAttribute?.("data-chat-role"));
+  return { chrome, agentBubble: bubbles[0], userBubble: bubbles[1] };
+}
+
+test("selecting text inside a sent message offers Quote, and selecting elsewhere does not", async () => {
+  const { chrome, agentBubble } = await chromeWithTranscript();
+
+  chrome.selectChatText(agentBubble, "five batches");
+  assert.equal(chrome.element("quoteButton").hidden, false);
+
+  chrome.selectChatText(agentBubble, "two passages", undefined, 2);
+  assert.equal(chrome.element("quoteButton").hidden, true);
+
+  chrome.selectChatText(chrome.element("chatInput"), "typed words");
+  assert.equal(chrome.element("quoteButton").hidden, true, "the composer is not part of the transcript");
+
+  chrome.selectChatText(agentBubble, "five batches");
+  chrome.selectChatText(agentBubble, "");
+  assert.equal(chrome.element("quoteButton").hidden, true, "clearing the selection hides the button");
+});
+
+test("Quote adds a removable card and sends the full quoted text with who wrote it", async () => {
+  const posts = [];
+  const long = "  Agent plan: ship in five batches, one hour apart.\n".repeat(6);
+  const { chrome, agentBubble, userBubble } = await chromeWithTranscript({
+    fetchImpl: async (url, init = {}) => {
+      posts.push({ url, body: init.body ? JSON.parse(init.body) : null });
+      return { ok: true, json: async () => ({ status: "queued" }) };
+    },
+  });
+
+  chrome.selectChatText(agentBubble, long);
+  chrome.element("quoteButton").click();
+  chrome.selectChatText(userBubble, "Can batch two move earlier?");
+  chrome.element("quoteButton").click();
+  assert.equal(chrome.element("quoteButton").hidden, true);
+  assert.equal((chrome.element("chatQuotes").innerHTML.match(/class="chat-quote"/g) || []).length, 2);
+
+  // Sending with no typed words still delivers the quotes.
+  chrome.element("send").click();
+  chrome.runTimers(5000);
+  await flushPromises();
+  await flushPromises();
+
+  const sent = posts.find((post) => post.url === "/api/abc/prompts").body.prompts[0];
+  assert.equal(sent.tag, "message");
+  assert.equal(sent.prompt, "");
+  assert.equal(sent.text, "The user quoted earlier messages from this conversation");
+  assert.deepEqual(sent.target, {
+    type: "chat-quote",
+    quotes: [
+      { from: "agent", text: long },
+      { from: "user", text: "Can batch two move earlier?" },
+    ],
+  });
+  assert.equal(chrome.element("chatQuotes").innerHTML, "", "sending clears the cards");
+});
+
+test("removing a quote card drops it from the next message", async () => {
+  const posts = [];
+  const { chrome, agentBubble, userBubble } = await chromeWithTranscript({
+    fetchImpl: async (url, init = {}) => {
+      posts.push({ url, body: init.body ? JSON.parse(init.body) : null });
+      return { ok: true, json: async () => ({ status: "queued" }) };
+    },
+  });
+  chrome.selectChatText(agentBubble, "five batches");
+  chrome.element("quoteButton").click();
+  chrome.selectChatText(userBubble, "batch two");
+  chrome.element("quoteButton").click();
+
+  const [firstRemove] = chrome.element("chatQuotes").querySelectorAll(".chat-quote-remove");
+  firstRemove.click();
+  chrome.element("chatInput").value = "Why?";
+  chrome.element("send").click();
+  chrome.runTimers(5000);
+  await flushPromises();
+  await flushPromises();
+
+  const sent = posts.find((post) => post.url === "/api/abc/prompts").body.prompts[0];
+  assert.equal(sent.prompt, "Why?");
+  assert.deepEqual(sent.target.quotes, [{ from: "user", text: "batch two" }]);
+});
+
+test("the chrome's queued quotes agree with the server's transcript quotes", async () => {
+  const prompt = {
+    prompt: "Why?",
+    selector: "",
+    tag: "message",
+    text: "The user quoted earlier messages from this conversation",
+    target: {
+      type: "chat-quote",
+      quotes: [
+        { from: "agent", text: "x".repeat(300) },
+        { from: "user", text: "  batch   two  " },
+      ],
+    },
+  };
+  const expected = chatEntryForPrompt({ uid: "", ...prompt }, "2026-09-15T00:00:00.000Z").quotes;
+  const chrome = await createChromeHarness({ storedQueue: [prompt] });
+  const rendered = [
+    ...chrome
+      .element("queuedLog")
+      .innerHTML.matchAll(
+        /<div class="anchor quote" title="Quoted from (the agent|you): ([^"]*)"><span class="anchor-kind">quote<\/span><span class="anchor-excerpt">\u201C([^<]*)\u201D<\/span><\/div>/g,
+      ),
+  ].map((match) => ({ from: match[1] === "the agent" ? "agent" : "user", excerpt: match[3] }));
+  assert.deepEqual(rendered, expected);
+  assert.equal(expected[0].excerpt.length, 120, "the transcript shows an excerpt, not the full quote");
+  chrome.element("queuedLog").dispatch("click", { target: queuedLogNode(["bubble", "queued"], 0) });
+  typeIntoQueuedEdit(chrome, "");
+  chrome.element("queuedLog").dispatch("click", { target: queuedLogNode(["queued-edit-save"], 0) });
+  assert.equal(chrome.queued()[0].prompt, "");
+  assert.deepEqual(chrome.queued()[0].target, prompt.target);
+});
+
+test("a frame note cannot claim a chat quote", async () => {
+  const chrome = await createChromeHarness();
+  chrome.sendFrameMessage({
+    type: "lavish:queuePrompt",
+    prompt: { prompt: "Keep this", target: { type: "chat-quote", quotes: [{ from: "agent", text: "invented" }] } },
+  });
+  assert.equal(chrome.queued()[0].prompt, "Keep this");
+  assert.equal(chrome.queued()[0].target, undefined);
+});
+
+test("a zoomed phone flips and clamps Quote inside the visual viewport", async () => {
+  const { chrome, agentBubble } = await chromeWithTranscript({
+    device: {
+      ...DESKTOP_SITE_PHONE,
+      screen: { width: 450, height: 900 },
+      innerWidth: 900,
+      visualViewport: { offsetLeft: 60, offsetTop: 100, width: 600, height: 500 },
+    },
+  });
+  // 手机上聊天在底部面板里，先打开面板才可能选中聊天文字。
+  chrome.element("panelHead").dispatch("click", {});
+  const button = chrome.element("quoteButton");
+  button.offsetWidth = 60;
+  button.offsetHeight = 24;
+  chrome.selectChatText(agentBubble, "five", { left: 620, right: 650, top: 540, bottom: 580 });
+  assert.equal(button.style.top, "238px");
+  assert.equal(button.style.left, "262px");
+});
+
+test("artifact focus dismisses the quote even after another scroll", async () => {
+  const { chrome, agentBubble } = await chromeWithTranscript();
+  chrome.selectChatText(agentBubble, "five batches");
+  const button = chrome.element("quoteButton");
+  assert.equal(button.hidden, false);
+  chrome.element("artifact").focus();
+  chrome.element("artifact").dispatch("focus", {});
+  chrome.element("panelScroll").dispatch("scroll", {});
+  assert.equal(button.hidden, true);
+  button.click();
+  assert.equal(chrome.element("chatQuotes").innerHTML || "", "");
+});
+
+test("Quote follows the visible intersection on viewport and panel changes", async () => {
+  const viewport = Object.assign(new EventTarget(), { offsetLeft: 0, offsetTop: 0, width: 800, height: 700 });
+  const { chrome, agentBubble } = await chromeWithTranscript({
+    device: { ...DESKTOP_SITE_PHONE, innerWidth: 800, visualViewport: viewport },
+  });
+  chrome.element("panelHead").dispatch("click", {});
+  const rect = { top: 300, bottom: 320, left: 100, right: 260 };
+  const button = chrome.element("quoteButton");
+  button.offsetWidth = 60;
+  button.offsetHeight = 24;
+  chrome.selectChatText(agentBubble, "five batches", rect);
+  assert.equal(button.style.top, "328px");
+  viewport.height = 330;
+  viewport.dispatchEvent(new Event("resize"));
+  assert.equal(button.style.top, "268px");
+  viewport.offsetLeft = 260;
+  viewport.dispatchEvent(new Event("scroll"));
+  assert.equal(button.hidden, true);
+  viewport.offsetLeft = 0;
+  viewport.dispatchEvent(new Event("scroll"));
+  assert.equal(button.hidden, false);
+  Object.assign(rect, { top: 15, bottom: 35 });
+  chrome.element("panelScroll").dispatch("scroll", {});
+  assert.equal(button.hidden, true);
+});
+
+test("a quote-only draft holds back a restart reload", async () => {
+  const { chrome, agentBubble } = await chromeWithTranscript({ fakeClock: true });
+  chrome.selectChatText(agentBubble, "five");
+  chrome.element("quoteButton").click();
+  chrome.eventSource().listeners.get("chrome-reload")({ data: JSON.stringify({ reason: "upgrade" }) });
+  await flushPromises();
+  chrome.advanceClock(5100);
+  chrome.runTimers(100);
+  await flushPromises();
+  assert.equal(chrome.element("outdatedBanner").hidden, false);
+  assert.equal(chrome.reloadCount(), 0);
+  assert.match(chrome.element("chatQuotes").innerHTML, /five/);
+});
+
+// 收起聊天面板后选区已看不见：按钮撤下、待引用选区丢弃，已经加入输入框的卡片保留；
+// 面板收起期间再出现的选区变化也不会让按钮回来。
+test("collapsing the conversation withdraws Quote and keeps the cards already added", async () => {
+  const { chrome, agentBubble, userBubble } = await chromeWithTranscript({ mobile: true });
+  chrome.dragDock(800, 680);
+  chrome.selectChatText(agentBubble, "five batches");
+  chrome.element("quoteButton").click();
+  chrome.selectChatText(userBubble, "batch two");
+  assert.equal(chrome.element("quoteButton").hidden, false);
+
+  chrome.dragDock(100, 220);
+  assert.equal(chrome.element("quoteButton").hidden, true);
+  assert.equal(chrome.selectionRangeCount(), 0, "the pending chat selection is dropped");
+
+  chrome.selectChatText(userBubble, "batch two");
+  assert.equal(chrome.element("quoteButton").hidden, true, "a selection while collapsed offers nothing");
+  assert.equal(chrome.selectionRangeCount(), 0, "a selection while collapsed is dropped too");
+
+  chrome.dragDock(800, 680);
+  chrome.element("panelScroll").dispatch("scroll", {});
+  assert.equal(chrome.selectionRangeCount(), 0, "reopening does not bring the old selection back");
+  assert.equal(chrome.element("quoteButton").hidden, true);
+  assert.match(chrome.element("chatQuotes").innerHTML, /five batches/);
+});
+
+test("folding the desktop sidebar withdraws Quote and keeps the cards already added", async () => {
+  const { chrome, agentBubble, userBubble } = await chromeWithTranscript();
+  chrome.selectChatText(agentBubble, "five batches");
+  chrome.element("quoteButton").click();
+  chrome.selectChatText(userBubble, "batch two");
+  assert.equal(chrome.element("quoteButton").hidden, false);
+
+  chrome.element("sidebarToggle").click();
+  assert.equal(chrome.element("quoteButton").hidden, true);
+  assert.equal(chrome.selectionRangeCount(), 0, "the pending chat selection is dropped");
+
+  chrome.element("sidebarToggle").click();
+  chrome.element("panelScroll").dispatch("scroll", {});
+  assert.equal(chrome.selectionRangeCount(), 0, "unfolding does not bring the old selection back");
+  assert.equal(chrome.element("quoteButton").hidden, true);
+  assert.match(chrome.element("chatQuotes").innerHTML, /five batches/);
 });
