@@ -2896,7 +2896,6 @@ const chromeIcons = {
   ),
   reveal: chromeIcon('<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>', 13),
   dismiss: chromeIcon('<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>', 13),
-  // 修订记录按钮的窄屏形态：顶栏放不下文字时只显示这个图标和数量。
   revisions: chromeIcon('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/>'),
   // The desktop conversation-panel toggle: a window with its right-hand column marked off.
   sidebar: chromeIcon('<rect x="3" y="4" width="18" height="16" rx="2"/><line x1="15" y1="4" x2="15" y2="20"/>'),

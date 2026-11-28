@@ -1828,11 +1828,10 @@ iframe {
 body.layout-gate-active iframe#artifact {
   opacity: 0;
 }
-/* Narrow chrome: the drawer stops hanging off the button and spans the viewport instead, so the
-   list never overflows horizontally on a phone-width window. */
+/* 窄屏下，警告和修订抽屉不再与按钮右对齐，避免抽屉左侧超出视口。 */
 @media (max-width: 640px) {
   .bar {
-    /* 警告和修订同时显示时，给更多按钮留足空间。 */
+    /* 先缩减顶栏的间距，给 More 腾出空间。 */
     gap: 4px;
     --bar-pad: var(--space-6);
   }
@@ -1851,7 +1850,7 @@ body.layout-gate-active iframe#artifact {
     width: auto;
     max-height: min(calc(var(--layout-vh, 100vh) * 0.7), 460px);
   }
-  /* 修订记录抽屉同理：右对齐按钮时在 320px 下左边会伸出视口，改为横跨视口；列表自身已限高滚动。 */
+  /* 修订列表已单独限高并滚动，抽屉无需再限高。 */
   .revisions-drawer {
     position: fixed;
     top: calc(var(--bar-h) + 8px);
@@ -2170,9 +2169,9 @@ body.layout-gate-active iframe#artifact {
   display: none;
 }
 
-/* 窄屏顶栏：320–430px 宽时品牌、布局警告、修订记录、批注开关和 More 排成一行放不下，More 会被挤出
-   视口，用户就无法发布或结束会话。修订记录先改成图标加数量（无障碍名称由 aria-label 提供），
-   375px 起的手机这样就够；更窄且布局警告也出现时，再把批注开关的文字改为仅读屏可见，开关本身保留。 */
+/* 窄屏顶栏不换行：底部会话面板和遮罩按 --bar-h 定位。压缩修订按钮，为两位数的警告计数留空间，
+   无障碍名称仍由 chrome-client.js 设置。两种按钮都出现且空间更紧时，只在视觉上隐藏
+   Annotate 文字，保留开关的可访问名称。与其他窄屏规则一样，显式 Desktop 布局不应用这些规则。 */
 @media (max-width: 430px) {
   .revisions-button > svg {
     display: block;
