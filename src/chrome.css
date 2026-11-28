@@ -513,8 +513,8 @@ body.lavish {
 }
 .sidebar-toggle-count {
   position: absolute;
-  top: -6px;
-  right: -6px;
+  top: -8px;
+  right: -8px;
   min-width: 18px;
   height: 18px;
   padding: 0 4px;
@@ -533,8 +533,8 @@ body.lavish {
 .sidebar-toggle.is-unread::after {
   content: "";
   position: absolute;
-  top: -3px;
-  right: -3px;
+  top: -4px;
+  right: -4px;
   width: 8px;
   height: 8px;
   border-radius: var(--radius-pill);
@@ -1828,8 +1828,13 @@ body.layout-gate-active iframe#artifact {
    list never overflows horizontally on a phone-width window. */
 @media (max-width: 640px) {
   .bar {
-    gap: 12px;
+    /* 警告和修订同时显示时，给更多按钮留足空间。 */
+    gap: 4px;
     --bar-pad: var(--space-6);
+  }
+  .warnings-button,
+  .revisions-button {
+    padding: 0 8px;
   }
   .brand-support {
     display: none;
