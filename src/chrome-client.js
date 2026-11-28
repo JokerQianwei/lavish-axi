@@ -2507,10 +2507,20 @@ function hideQuoteButton() {
 }
 
 // 聊天面板被收起（手机底部面板放下、桌面侧栏折叠）时，选区已经看不见：撤下按钮并丢弃聊天里的
-// 待引用选区，已加入输入框的卡片不受影响。由面板状态变化和每次按钮更新调用。
+// 待引用选区，已加入输入框的卡片不受影响。返回面板是否收起。
 function dismissQuoteForHiddenConversation() {
   if (!isConversationHidden()) return false;
-  if (chatSelectionQuote()) document.getSelection()?.removeAllRanges();
+  const selection = document.getSelection?.();
+  if (selection) {
+    // 隐藏后选区文本可能为空，但 Range 仍会在面板重新展开时恢复高亮。
+    for (let i = 0; i < selection.rangeCount; i++) {
+      const { startContainer, endContainer } = selection.getRangeAt(i);
+      if (chatLog.contains(startContainer) || chatLog.contains(endContainer)) {
+        selection.removeAllRanges();
+        break;
+      }
+    }
+  }
   hideQuoteButton();
   return true;
 }
