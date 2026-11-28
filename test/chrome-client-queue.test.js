@@ -10388,6 +10388,7 @@ test("collapsing the conversation withdraws Quote and keeps the cards already ad
 
   chrome.dragDock(800, 680);
   chrome.element("panelScroll").dispatch("scroll", {});
+  assert.equal(chrome.selectionRangeCount(), 0, "reopening does not bring the old selection back");
   assert.equal(chrome.element("quoteButton").hidden, true);
   assert.match(chrome.element("chatQuotes").innerHTML, /five batches/);
 });
@@ -10405,6 +10406,7 @@ test("folding the desktop sidebar withdraws Quote and keeps the cards already ad
 
   chrome.element("sidebarToggle").click();
   chrome.element("panelScroll").dispatch("scroll", {});
+  assert.equal(chrome.selectionRangeCount(), 0, "unfolding does not bring the old selection back");
   assert.equal(chrome.element("quoteButton").hidden, true);
   assert.match(chrome.element("chatQuotes").innerHTML, /five batches/);
 });
