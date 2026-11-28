@@ -68,6 +68,27 @@ test("inline code protects the markers inside it", () => {
   );
 });
 
+// Agents bold a phrase that contains a path or name in code, and CJK replies put the closing `**`
+// right against full-width punctuation. Both must still close the emphasis.
+test("emphasis spans inline code and closes against CJK punctuation", () => {
+  assert.equal(
+    renderChatMarkdown("1. **确认 `designspace-skills` 已改名**：实地核对，已更名为 **`qw-design`**（见上）"),
+    "<ol><li><strong>确认 <code>designspace-skills</code> 已改名</strong>：实地核对，已更名为 <strong><code>qw-design</code></strong>（见上）</li></ol>",
+  );
+  assert.equal(
+    renderChatMarkdown("[see `a`](https://x.y/z) and https://x.y/`b` and ~~`old`~~"),
+    '<p><a href="https://x.y/z" target="_blank" rel="noopener noreferrer">see <code>a</code></a> and <a href="https://x.y/" target="_blank" rel="noopener noreferrer">https://x.y/</a><code>b</code> and <del><code>old</code></del></p>',
+  );
+});
+
+// A long path in a narrow column should wrap at its separators, not mid-segment.
+test("inline code offers a line break after each slash", () => {
+  assert.equal(
+    renderChatMarkdown("open `/root/.agents/skills/qw-design/` now"),
+    "<p>open <code>/<wbr>root/<wbr>.agents/<wbr>skills/<wbr>qw-design/</code> now</p>",
+  );
+});
+
 test("links and bare https urls open in a new tab and only http(s) becomes a link", () => {
   assert.equal(
     renderChatMarkdown("see [docs](https://example.com/a?b=1&c=2) or https://x.y/z) and [bad](javascript:alert(1))"),

@@ -267,11 +267,22 @@ function renderLinksAndEmphasis(text) {
   return html + renderEmphasis(text.slice(offset));
 }
 
+// 行内代码里的路径在窄栏里常要换行：在每个 `/` 后给一个换行点（末尾的除外），让它按路径段断开，
+// 而不是在段中间断。`-` 处浏览器本来就能断。<wbr> 不进复制出来的文本。
+function renderCode(code) {
+  return "<code>" + escapeHtml(code).replace(/\/(?=.)/g, "/<wbr>") + "</code>";
+}
+
+// 代码段和图片先换成 `<n>` 占位，再对整行跑链接和强调规则，最后换回。这样 `**确认 `x` 已改名**`
+// 这种跨代码段的强调才能配对，代码里的 `*` `_` `~` 又碰不到。用 `<` 做占位是因为常规文本已经
+// 转义，不会再出现裸 `<`；链接目标扫描遇到 `<` 就停，占位不会进 href；强调规则生成的标签都不是纯数字，
+// 换回时不会误伤。
 function renderInline(text) {
   let html = "";
   let offset = 0;
   let i = 0;
   const imageScanner = createImageScanner(text);
+  const protectedHtml = [];
   while (i < text.length) {
     let end = -1;
     let code = false;
@@ -288,12 +299,13 @@ function renderInline(text) {
       i += 1;
       continue;
     }
-    html += renderLinksAndEmphasis(escapeHtml(text.slice(offset, i)));
-    html += code ? "<code>" + escapeHtml(text.slice(i + 1, end - 1)) + "</code>" : escapeHtml(text.slice(i, end));
+    html += escapeHtml(text.slice(offset, i)) + "<" + protectedHtml.length + ">";
+    protectedHtml.push(code ? renderCode(text.slice(i + 1, end - 1)) : escapeHtml(text.slice(i, end)));
     i = end;
     offset = end;
   }
-  return html + renderLinksAndEmphasis(escapeHtml(text.slice(offset)));
+  html += escapeHtml(text.slice(offset));
+  return renderLinksAndEmphasis(html).replace(/<(\d+)>/g, (_, index) => protectedHtml[Number(index)]);
 }
 
 // Items nest by indentation; a change of marker at the same depth starts a new list, as

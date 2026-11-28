@@ -1027,7 +1027,8 @@ test("chrome chat bubbles follow the preview mock shades", async () => {
   assert.match(css, /\.bubble\.user\{[^}]*background:var\(--bg-elevated\)/);
   assert.match(css, /\.bubble\.user\{[^}]*border-color:var\(--border-strong\)/);
   assert.match(css, /\.bubble\.agent\{[^}]*background:transparent/);
-  assert.match(css, /\.bubble\.agent\{[^}]*border-color:var\(--border-subtle\)/);
+  // Agent 回复不套卡片框：面板已是容器。
+  assert.match(css, /\.bubble\.agent\{[^}]*border:0/);
   assert.match(css, /border-top-color:var\(--accent\)/);
 });
 
