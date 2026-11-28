@@ -600,9 +600,7 @@ function userBubbleTextHtml(entry, text) {
   return displayText ? '<div class="bubble-text">' + escapeHtml(displayText) + "</div>" : "";
 }
 
-// A queued note is the user bubble in its not-yet-sent state: dashed, labelled Queued (Sending
-// while its batch is in flight), and editable and removable until then. It settles in place as a
-// sent bubble once the server's transcript carries it, so nothing moves between regions.
+// 已入队备注由当前标签页渲染，直到服务端的对话记录确认接收；确认后消息在原位转为已发送。
 function queuedBubbleHtml(prompt, index) {
   const sending = isPromptSending(prompt);
   if (!sending && editingPromptId && promptIdentity(prompt) === editingPromptId) {

@@ -34,7 +34,7 @@ queued ──send──> sent ──poll takes it──> seen ──artifact cha
  (tab)          (server)                 (agent)                    (agent)                  (agent)
 ```
 
-- **queued**: in the tab only (dashed bubble). Unchanged.
+- **queued**: in the tab only.
 - **sent**: a `role: "user"` chat entry with no `delivered_at`. The bubble says why it has not been
   seen, from the live presence the chrome already holds: "No agent is listening" (`waiting`),
   "Agent is busy; delivered on its next poll" (`working` / external listener), or "Delivering"
@@ -79,13 +79,10 @@ the stamps with no new wire shape.
 
 ## UI
 
-Each sent user bubble gets a one-line receipt under its text: the three emoji of the Telegram ack
-protocol this mirrors, 👀 Seen, 🛠️ Working, ✅ Done, each lighting up once its stamp exists and
-shown greyed and dimmed until then, so the row always shows what is still to come. Every step
-carries its label and time (or "not yet") as both `title` and `aria-label`, so hover and screen
-readers say the word, not the glyph. Before 👀 lights, the row carries the honest reason from the
-presence stream. The session-wide "Working..." bubble and
-presence banner are unchanged; the receipt is the per-request view of the same facts.
+See **Delivery receipts** in [How It Works](../README.md#how-it-works) for how each state appears to the reviewer.
+Every step carries its label and time (or "not yet") as both `title` and `aria-label`, so hover
+and screen readers say the word, not the glyph. The receipt is the per-request view of the same
+facts as the session-wide presence banner.
 
 A presence change rewrites only the undelivered line, the one part of the row that depends on it.
 The rest of the bubble is left alone, so a thumbnail already replaced by "Image expired" stays so.
