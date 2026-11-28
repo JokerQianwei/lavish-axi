@@ -763,8 +763,8 @@ test("annotation card title renders selected tag as an html element name", () =>
 test("annotation card shadow styles use Lavish design-system variables", () => {
   const js = createSdkJs("abc");
 
-  assert.match(js, /--ink-900:#0f1115/);
-  assert.match(js, /--accent:#f4c95d/);
+  assert.match(js, /--gray-950:#111112/);
+  assert.match(js, /--accent:#0071e3/);
   assert.match(js, /--font-sans:/);
   assert.match(js, /font-family:var\(--font-sans\)/);
   assert.match(js, /:focus-visible\{outline:2px solid var\(--accent\);outline-offset:2px/);
@@ -780,7 +780,7 @@ test("chrome top bar uses an Annotate switch instead of a labeled toggle button"
   assert.doesNotMatch(html, /Inspect/);
 });
 
-test("annotate switch shows a brass track and ink knob when enabled", async () => {
+test("annotate switch shows an accent track and accent-ink knob when enabled", async () => {
   const js = await chromeClientSource();
   const css = await chromeCssSource();
 
@@ -792,15 +792,16 @@ test("annotate switch shows a brass track and ink knob when enabled", async () =
 test("chrome declares the Lavish design-system tokens", async () => {
   const css = await chromeCssSource();
 
-  assert.match(css, /--ink-900:#0f1115/);
-  assert.match(css, /--cream-100:#f7f3ea/);
-  assert.match(css, /--brass-500:#f4c95d/);
-  assert.match(css, /--font-serif:/);
+  assert.match(css, /--gray-950:#111112/);
+  assert.match(css, /--gray-50:#f5f5f7/);
+  assert.match(css, /--blue-500:#0071e3/);
+  assert.match(css, /--accent:var\(--blue-500\)/);
+  assert.doesNotMatch(css, /--font-serif:/);
   assert.match(css, /--font-sans:/);
   assert.match(css, /--text-display:92px/);
   assert.match(css, /--lh-display:1/);
   assert.match(css, /--space-32:64px/);
-  assert.match(css, /--shadow-floating:0 20px 70px rgba\(0,0,0,.35\)/);
+  assert.match(css, /--shadow-floating:0 12px 40px rgba\(0,0,0,.45\)/);
   assert.match(css, /--ease:cubic-bezier\(.2,.6,.2,1\)/);
   assert.match(css, /--dur-slow:320ms/);
   assert.match(css, /--bar-h:56px/);
@@ -810,11 +811,11 @@ test("chrome declares the Lavish design-system tokens", async () => {
 test("artifact SDK uses design-token aliases for annotation highlight and shadow UI", () => {
   const js = createSdkJs("abc");
 
-  assert.match(js, /--lavish-accent:#f4c95d/);
+  assert.match(js, /--lavish-accent:#0071e3/);
   assert.match(js, /--lavish-annotate-outline:2px solid var\(--lavish-accent\)/);
-  assert.match(js, /el\.style\.outline\s*=\s*["']var\(--lavish-annotate-outline,2px solid #f4c95d\)["']/);
+  assert.match(js, /el\.style\.outline\s*=\s*["']var\(--lavish-annotate-outline,2px solid #0071e3\)["']/);
   assert.match(js, /el\.style\.outlineOffset\s*=\s*["']var\(--lavish-annotate-offset,2px\)["']/);
-  assert.match(js, /--fg-faint:var\(--steel-300\)/);
+  assert.match(js, /--fg-faint:var\(--gray-300\)/);
   assert.match(js, /textarea::placeholder\{color:var\(--fg-faint\)\}/);
   assert.doesNotMatch(js, /placeholder\{color:#aeb6c6\}/);
 });
@@ -853,8 +854,8 @@ test("chrome top bar follows the design mock wordmark and overflow menu treatmen
 
   assert.match(html, /class="brand-mark">Lavish/);
   assert.match(html, /class="brand-support">Editor/);
-  assert.match(css, /font-family:var\(--font-serif\)/);
-  assert.match(css, /letter-spacing:\.18em/);
+  assert.match(css, /\.brand-mark\{[^}]*font-weight:var\(--w-semi\)/);
+  assert.doesNotMatch(css, /var\(--font-serif\)/);
   assert.match(html, /class="more-button" id="moreButton"/);
   assert.match(html, /class="menu more-menu" id="moreMenu" hidden/);
   assert.doesNotMatch(html, /class="file-input"/);
@@ -870,7 +871,7 @@ test("overflow menu shows the artifact path with a copy affordance", async () =>
   assert.match(html, /class="menu-file" id="copyPath"[^>]*title="Copy path · \/tmp\/artifact\/index\.html"/);
   assert.match(html, /class="copy-hint"/);
   assert.match(css, /\.menu-file\{[^}]*font-family:var\(--font-mono\)/);
-  assert.match(css, /\.copy-hint\.copied\{color:var\(--accent-hover\)/);
+  assert.match(css, /\.copy-hint\.copied\{color:var\(--accent-text\)/);
 });
 
 test("overflow menu path keeps the file name visible and elides the directories", async () => {
@@ -1013,19 +1014,19 @@ test("clipboard copy falls back when navigator clipboard rejects", async () => {
   assert.doesNotMatch(js, /navigator\.clipboard\.writeText\(text\)\.catch/);
 });
 
-test("chrome centers the top bar row while bottom-aligning the identity cluster", async () => {
+test("chrome centers the top bar row while baseline-aligning the identity cluster", async () => {
   const css = await chromeCssSource();
 
   assert.match(css, /\.bar\{[^}]*align-items:center/);
-  assert.match(css, /\.brand\{[^}]*height:22px/);
-  assert.match(css, /\.brand\{[^}]*align-items:flex-end/);
+  assert.match(css, /\.brand\{[^}]*align-items:baseline/);
 });
 
-test("chrome chat bubbles follow the preview mock shades", async () => {
+test("chrome chat bubbles use one neutral fill without nested borders", async () => {
   const css = await chromeCssSource();
 
+  assert.match(css, /\.bubble\{[^}]*border:0/);
   assert.match(css, /\.bubble\.user\{[^}]*background:var\(--bg-elevated\)/);
-  assert.match(css, /\.bubble\.user\{[^}]*border-color:var\(--border-strong\)/);
+  assert.match(css, /\.bubble\.queued\{background:var\(--accent-soft\)/);
   assert.match(css, /\.bubble\.agent\{[^}]*background:transparent/);
   // Agent 回复不套卡片框：面板已是容器。
   assert.match(css, /\.bubble\.agent\{[^}]*border:0/);
@@ -1093,7 +1094,8 @@ test("composer offers two always-visible top-level send actions", async () => {
   assert.doesNotMatch(html, /id="sendCaret"/);
   assert.doesNotMatch(html, /id="sendMenu"/);
   assert.doesNotMatch(html, /id="sendFromMenu"/);
-  assert.match(css, /\.button-danger\{[^}]*color:var\(--danger\)/);
+  assert.match(css, /\.button-danger\{[^}]*color:var\(--fg-dim\)/);
+  assert.match(css, /\.button-danger:hover:not\(:disabled\)\{[^}]*color:var\(--danger\)/);
   assert.match(css, /\.actions\{[^}]*min-width:0/);
 });
 
@@ -3581,7 +3583,7 @@ test("/chrome.css serves the extracted chrome stylesheet", async () => {
 
     assert.equal(res.status, 200);
     assert.match(res.headers.get("content-type") || "", /text\/css/);
-    assert.match(normalizeCssForAssertions(body), /--ink-900:#0f1115/);
+    assert.match(normalizeCssForAssertions(body), /--gray-950:#111112/);
     assert.match(
       normalizeCssForAssertions(body),
       /\.layout\{[^}]*grid-template-columns:minmax\(0,1fr\) ?var\(--panel-w\)/,
@@ -6438,8 +6440,8 @@ test("ended session shows an overlay card over the dimmed chrome", async () => {
   assert.match(html, /class="ended-copy">\/tmp\/artifact\.html</);
   assert.doesNotMatch(html, /The agent polling loop can stop\./);
   assert.match(css, /\.ended-overlay\{[^}]*inset:var\(--bar-h\) 0 0 0/);
-  assert.match(css, /\.ended-overlay\{[^}]*background:rgba\(15,17,21,.86\)/);
-  assert.match(css, /\.ended-title\{[^}]*font-family:var\(--font-serif\)/);
+  assert.match(css, /\.ended-overlay\{[^}]*background:rgba\(17,17,18,.86\)/);
+  assert.match(css, /\.ended-title\{[^}]*font-weight:var\(--w-semi\)/);
   assert.match(js, /endedOverlay\.hidden = false/);
   assert.match(js, /annotationSwitch\.disabled = true/);
   assert.match(js, /moreButton\.disabled = true/);
